@@ -7,12 +7,12 @@ import re
 import pytz
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v18.4", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v18.5", page_icon="🛵", layout="centered")
 
-# --- 終極 CSS 魔法：權重平衡優化 ---
+# --- 終極 CSS 魔法 ---
 st.markdown("""
 <style>
-    /* 1. 全寬度按鈕紀錄列美化 */
+    /* 1. 紀錄列按鈕美化 */
     div.stButton > button:first-child {
         background-color: white !important;
         color: #31333F !important;
@@ -39,7 +39,7 @@ st.markdown("""
         opacity: 0 !important;
     }
     
-    /* 3. 調整 Tab 字體大小 */
+    /* 3. Tab 字體大小 */
     button[data-baseweb="tab"] {
         font-size: 16px !important;
     }
@@ -55,8 +55,8 @@ TAIPEI_TZ = pytz.timezone('Asia/Taipei')
 try:
     g = Github(st.secrets["GITHUB_TOKEN"])
     repo = g.get_repo(REPO_NAME)
-except:
-    st.error("GitHub 驗證失敗")
+except Exception as e:
+    st.error(f"GitHub 驗證失敗: {e}")
     st.stop()
 
 @st.cache_data(ttl=60)
@@ -66,9 +66,11 @@ def load_data():
     if '漏記' not in data.columns: data['漏記'] = 'No'
     data['日期'] = pd.to_datetime(data['日期'])
     data = data.sort_values("日期", ascending=False).reset_index(drop=True)
-    return data, file_sha_val
+    # 確保回傳值名稱正確
+    return data, file_content.sha
 
-df, file_sha_val = load_data()
+# 正確接收回傳值
+df, current_file_sha = load_data()
 
 # 初始化編輯狀態
 if 'edit_idx' not in st.session_state:
@@ -122,10 +124,8 @@ if st.session_state.edit_idx is not None:
 tab1, tab2 = st.tabs(["🏠 首頁", "⛽ 新增加油"])
 
 with tab1:
-    # 縮小「小迪」顯示
     st.write("🛵 <span style='font-size: 13px; color: gray;'>小迪</span>", unsafe_allow_html=True)
     
-    # 油耗計算
     avg_eff = "--"
     latest_km = df['里程'].max() if not df.empty else 0
     if len(df) >= 2 and df.iloc[0]['漏記'] == 'No':
@@ -134,7 +134,6 @@ with tab1:
             avg_eff = f"{round((df.iloc[0]['里程'] - df.iloc[1]['里程']) / prev_liters, 1)}"
         except: pass
 
-    # --- 儀表板：放大數值，微調字體大小平衡 ---
     dashboard_html = f"""
     <div style="display: flex; gap: 8px; margin: 5px 0 15px 0;">
         <div style="flex: 1; background: white; padding: 15px 10px; border-radius: 12px; border: 1px solid #f0f2f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); text-align: center;">
@@ -148,21 +147,11 @@ with tab1:
     </div>
     """
     st.markdown(dashboard_html, unsafe_allow_html=True)
+    st.write("📖 **加油紀錄**")
     
-    # 修改標題樣式，不使用 subheader 避免字體過大
-    st.write("📖 **加油紀錄**", unsafe_allow_html=True)
-    
-    # 紀錄分頁
     items_per_page = 8
     total_pages = max((len(df) // items_per_page) + (1 if len(df) % items_per_page > 0 else 0), 1)
-    
-    # 只有一頁以上才顯示滑桿
-    if total_pages > 1:
-        page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1)
-    else:
-        page = 1
-    
-    st.write("") # 增加一點點間距
+    page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1) if total_pages > 1 else 1
     
     start_idx = (page - 1) * items_per_page
     for index, row in df.iloc[start_idx : start_idx + items_per_page].iterrows():
@@ -171,7 +160,6 @@ with tab1:
         km = f"{row['里程']}k"
         amt = f"${row['金額']}"
         oil = row['細目'].split('/')[0]
-        
         btn_label = f"{dt}{miss} | {km} | {amt} | {oil}"
         if st.button(btn_label, key=f"rec_{index}", use_container_width=True):
             st.session_state.edit_idx = index
@@ -205,6 +193,6 @@ with tab2:
                 combined_df['日期'] = pd.to_datetime(combined_df['日期'])
                 combined_df = combined_df.sort_values("日期", ascending=False)
                 combined_df['日期'] = combined_df['日期'].dt.strftime('%Y-%m-%d %H:%M')
-                repo.update_file(FILE_PATH, "Add", combined_df.to_csv(index=False), file_sha_val)
+                repo.update_file(FILE_PATH, "Add", combined_df.to_csv(index=False), current_file_sha)
                 st.cache_data.clear()
                 st.rerun()
