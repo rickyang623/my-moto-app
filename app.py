@@ -7,7 +7,7 @@ import re
 import pytz
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v22.1", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v22.2", page_icon="🛵", layout="centered")
 
 # --- CSS 魔法 ---
 st.markdown("""
@@ -45,9 +45,16 @@ except:
 @st.cache_data(ttl=60)
 def load_data():
     file_content = repo.get_contents(FILE_PATH)
-    data = pd.read_csv(io.StringIO(file_content.decoded_content.decode('utf-8')))
-    for col in ['漏記', '備註', '店家', '類別']:
-        if col not in data.columns: data[col] = 'No' if col == '漏記' else ''
+    raw_csv = file_content.decoded_content.decode('utf-8')
+    data = pd.read_csv(io.StringIO(raw_csv))
+    
+    # 🛡️ 關鍵修正：強制將文字欄位轉為 object/string 類型，避免 TypeError
+    text_cols = ['漏記', '備註', '店家', '類別', '細目']
+    for col in text_cols:
+        if col not in data.columns:
+            data[col] = ''
+        data[col] = data[col].fillna('').astype(str)
+        
     data['日期'] = pd.to_datetime(data['日期'])
     data = data.sort_values("日期", ascending=False).reset_index(drop=True)
     return data, file_content.sha
@@ -60,6 +67,7 @@ if 'dialog_mode' not in st.session_state: st.session_state.dialog_mode = "view"
 # 3. 詳情與編輯彈窗
 @st.dialog("📋 紀錄管理")
 def manage_dialog(index):
+    # 重新取得最新 row 數據避免類型跑掉
     row = df.iloc[index]
     
     if st.session_state.dialog_mode == "view":
@@ -70,7 +78,7 @@ def manage_dialog(index):
         st.divider()
         st.write("**明細：**")
         st.info(row['細目'])
-        if row['備註']: st.write(f"💬 備註：{row['備註']}")
+        if row['備註'] and row['備註'] != 'nan': st.write(f"💬 備註：{row['備註']}")
         
         st.divider()
         c1, c2 = st.columns(2)
@@ -88,40 +96,49 @@ def manage_dialog(index):
     else: # 編輯模式
         with st.form("edit_mode_form"):
             st.write("🔧 **正在編輯紀錄**")
+            # 處理備註內容，如果是 'nan' 就顯示空白
+            current_note = "" if str(row['備註']) == 'nan' else str(row['備註'])
+            
             e_date = st.date_input("日期", row['日期'].date())
             e_time = st.time_input("時間", row['日期'].time())
             e_km = st.number_input("里程 (km)", value=int(row['里程']))
             e_amt = st.number_input("金額 ($)", value=int(row['金額']))
-            e_note = st.text_area("備註", value=str(row['備註']))
+            e_note = st.text_area("備註", value=current_note)
             
-            e_miss = row['漏記']
-            e_shop = row['店家']
-            e_detail = row['細目']
+            # 初始化暫存變數
+            e_miss = str(row['漏記'])
+            e_shop = "" if str(row['店家']) == 'nan' else str(row['店家'])
+            e_detail = str(row['細目'])
             
             if row['類別'] == "加油":
-                # 解析原本的油種 (例如 "95無鉛/10.2L" -> "95無鉛")
-                original_type = row['細目'].split('/')[0] if '/' in row['細目'] else "95無鉛"
-                e_type = st.selectbox("修改油種", list(GAS_PRICES.keys()), index=list(GAS_PRICES.keys()).index(original_type) if original_type in GAS_PRICES else 1)
-                
-                e_miss_bool = st.checkbox("漏記標記 (不計入油耗)", value=(row['漏記'] == "Yes"))
+                original_type = row['細目'].split('/')[0] if '/' in str(row['細目']) else "95無鉛"
+                e_type = st.selectbox("修改油種", list(GAS_PRICES.keys()), 
+                                    index=list(GAS_PRICES.keys()).index(original_type) if original_type in GAS_PRICES else 1)
+                e_miss_bool = st.checkbox("漏記標記 (不計入油耗)", value=(str(row['漏記']) == "Yes"))
                 e_miss = "Yes" if e_miss_bool else "No"
-                
-                # 在按下儲存時會根據 e_amt 和 e_type 重新算 L
                 new_L = round(e_amt / GAS_PRICES[e_type], 2) if e_amt > 0 else 0.0
                 e_detail = f"{e_type}/{new_L}L"
             else:
-                e_shop = st.text_input("施工店家", value=str(row['店家']))
-                e_detail = st.text_area("維修明細", value=str(row['細目']))
+                e_shop = st.text_input("施工店家", value=e_shop)
+                e_detail = st.text_area("維修明細", value=e_detail)
 
             if st.form_submit_button("💾 儲存更新", use_container_width=True):
                 full_dt = datetime.combine(e_date, e_time).strftime('%Y-%m-%d %H:%M')
-                df.loc[index, '日期'] = pd.to_datetime(full_dt)
-                df.loc[index, '里程'] = e_km
-                df.loc[index, '金額'] = e_amt
-                df.loc[index, '備註'] = e_note
-                df.loc[index, '漏記'] = e_miss
-                df.loc[index, '店家'] = e_shop
-                df.loc[index, '細目'] = e_detail
+                
+                # 🛡️ 再次確保數據為正確類型再寫入
+                new_data_row = {
+                    '日期': pd.to_datetime(full_dt),
+                    '類別': str(row['類別']),
+                    '里程': int(e_km),
+                    '金額': int(e_amt),
+                    '細目': str(e_detail),
+                    '漏記': str(e_miss),
+                    '備註': str(e_note),
+                    '店家': str(e_shop)
+                }
+                
+                for k, v in new_data_row.items():
+                    df.at[index, k] = v
                 
                 final_df = df.sort_values("日期", ascending=False)
                 final_df['日期'] = final_df['日期'].dt.strftime('%Y-%m-%d %H:%M')
@@ -143,14 +160,13 @@ tab1, tab2 = st.tabs(["🏠 首頁", "➕ 新增紀錄"])
 with tab1:
     st.write("🛵 <span style='font-size: 13px; color: gray;'>小迪</span>", unsafe_allow_html=True)
     
-    # 油耗計算 (精準過濾加油類別)
     avg_eff = "--"
     gas_only = df[df['類別'] == '加油'].copy().reset_index(drop=True)
-    if len(gas_only) >= 2 and gas_only.iloc[0]['漏記'] != 'Yes':
+    if len(gas_only) >= 2 and str(gas_only.iloc[0]['漏記']) != 'Yes':
         try:
             curr_km = float(gas_only.iloc[0]['里程'])
             prev_km = float(gas_only.iloc[1]['里程'])
-            match = re.search(r"(\d+\.?\d*)L", gas_only.iloc[1]['細目'])
+            match = re.search(r"(\d+\.?\d*)L", str(gas_only.iloc[1]['細目']))
             if match:
                 prev_liters = float(match.group(1))
                 if prev_liters > 0: avg_eff = f"{round((curr_km - prev_km) / prev_liters, 1)}"
@@ -165,7 +181,7 @@ with tab1:
         </div>
         <div style="flex: 1; background: white; padding: 15px 10px; border-radius: 12px; border: 1px solid #f0f2f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); text-align: center;">
             <div style="font-size: 12px; color: #666;">平均油耗</div>
-            <div style="font-size: 22px; font-weight: 800; color: #31333F;">{avg_eff} <span style="font-size: 13px;">km/L</span></div>
+            <div style="font-size: 22px; font-weight: 800; color: #31333F;">{avg_eff} <span style="font-size: 14px;">km/L</span></div>
         </div>
     </div>
     """
@@ -177,8 +193,8 @@ with tab1:
     page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1) if total_pages > 1 else 1
     
     for index, row in df.iloc[(page-1)*items_per_page : page*items_per_page].iterrows():
-        icon = "⛽" if row['類別'] == '加油' else "🛠️"
-        miss_tag = " ⚠️" if row['漏記'] == 'Yes' else ""
+        icon = "⛽" if str(row['類別']) == '加油' else "🛠️"
+        miss_tag = " ⚠️" if str(row['漏記']) == 'Yes' else ""
         label = f"{icon} {row['日期'].strftime('%m/%d %H:%M')} | {row['里程']}k | ${int(row['金額'])}{miss_tag}"
         if st.button(label, key=f"rec_{index}", use_container_width=True):
             st.session_state.edit_idx = index
