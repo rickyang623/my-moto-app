@@ -3,319 +3,234 @@ import pandas as pd
 from github import Github
 from datetime import datetime
 import io
-import requests
-import base64
+import re
 import pytz
-import uuid
-import time
 
-# ─────────────────────────────────────────
 # 1. 頁面配置
-# ─────────────────────────────────────────
-st.set_page_config(page_title="MyMoto99 v24.4", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v22.2", page_icon="🛵", layout="centered")
 
+# --- CSS 魔法 ---
 st.markdown("""
 <style>
     div.stButton > button:first-child {
         background-color: white !important;
         color: #31333F !important;
-        border: 1px solid #e0e0e0 !important;
-        padding: 10px 15px !important;
+        border: 1px solid #f0f2f6 !important;
+        padding: 12px 15px !important;
+        text-align: left !important;
+        display: block !important;
         width: 100% !important;
-        border-radius: 12px !important;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.05) !important;
+        margin-bottom: -10px !important;
+        transition: 0.2s;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        border-radius: 10px !important;
     }
-    .service-item-box {
-        background-color: rgba(151, 166, 195, 0.12);
-        padding: 10px 15px;
-        border-radius: 10px;
-        margin-bottom: 6px;
-        border-left: 5px solid #ff4b4b;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
+    .stTextInput { height: 0px !important; padding: 0px !important; margin: 0px !important; opacity: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-REPO_NAME  = "rickyang623/my-moto-app"
-TAIPEI_TZ  = pytz.timezone('Asia/Taipei')
+REPO_NAME = "rickyang623/my-moto-app"
+FILE_PATH = "data.csv"
 GAS_PRICES = {"92無鉛": 32.4, "95無鉛": 33.9, "98無鉛": 35.9}
+TAIPEI_TZ = pytz.timezone('Asia/Taipei')
 
-# ─────────────────────────────────────────
-# 2. GitHub 連線（PyGithub，僅用於寫入）
-# ─────────────────────────────────────────
+# 2. 登入 GitHub
 try:
-    TOKEN = st.secrets["GITHUB_TOKEN"]
-    g    = Github(TOKEN)
+    g = Github(st.secrets["GITHUB_TOKEN"])
     repo = g.get_repo(REPO_NAME)
-except Exception as e:
-    st.error(f"GitHub 驗證失敗：{e}")
+except:
+    st.error("GitHub 驗證失敗")
     st.stop()
 
-# ─────────────────────────────────────────
-# 3. 資料讀取：直接打 REST API + 禁用快取
-#    ✅ 完全繞過 PyGithub 物件快取
-# ─────────────────────────────────────────
-def get_atomic_data(file_name: str):
-    """
-    使用 requests 直接呼叫 GitHub Contents API，
-    並帶 Cache-Control: no-cache 確保每次都拿到最新版本。
-    回傳 (DataFrame, sha)
-    """
-    url     = f"https://api.github.com/repos/{REPO_NAME}/contents/{file_name}"
-    headers = {
-        "Authorization": f"token {TOKEN}",
-        "Cache-Control": "no-cache",
-        "Pragma":        "no-cache",
-    }
-    try:
-        params = {"_": int(time.time() * 1000)}
-        resp = requests.get(url, headers=headers, params=params, timeout=10)
-        resp.raise_for_status()
-        data    = resp.json()
-        content = base64.b64decode(data["content"]).decode("utf-8")
-        df      = pd.read_csv(io.StringIO(content))
-        return df, data["sha"]
-    except Exception as e:
-        st.error(f"讀取 {file_name} 失敗：{e}")
-        return pd.DataFrame(), None
+@st.cache_data(ttl=60)
+def load_data():
+    file_content = repo.get_contents(FILE_PATH)
+    raw_csv = file_content.decoded_content.decode('utf-8')
+    data = pd.read_csv(io.StringIO(raw_csv))
+    
+    # 🛡️ 關鍵修正：強制將文字欄位轉為 object/string 類型，避免 TypeError
+    text_cols = ['漏記', '備註', '店家', '類別', '細目']
+    for col in text_cols:
+        if col not in data.columns:
+            data[col] = ''
+        data[col] = data[col].fillna('').astype(str)
+        
+    data['日期'] = pd.to_datetime(data['日期'])
+    data = data.sort_values("日期", ascending=False).reset_index(drop=True)
+    return data, file_content.sha
 
-def load_master(df: pd.DataFrame) -> pd.DataFrame:
-    """清洗主表：型別轉換、排序"""
-    if df.empty:
-        return df
-    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
-    df = df.dropna(subset=["日期"]).sort_values("日期", ascending=False).reset_index(drop=True)
-    df["里程"] = pd.to_numeric(df["里程"], errors="coerce").fillna(0).astype(int)
-    if "id" in df.columns:
-        df["id"] = df["id"].astype(str)
-    return df
+df, file_sha_val = load_data()
 
-def load_detail(df: pd.DataFrame) -> pd.DataFrame:
-    """清洗細項表：確保 parent_id 為字串"""
-    if not df.empty and "parent_id" in df.columns:
-        df["parent_id"] = df["parent_id"].astype(str)
-    return df
+if 'edit_idx' not in st.session_state: st.session_state.edit_idx = None
+if 'dialog_mode' not in st.session_state: st.session_state.dialog_mode = "view"
 
-# 啟動時讀取
-raw_master, master_sha = get_atomic_data("data.csv")
-raw_detail, detail_sha = get_atomic_data("service_details.csv")
-
-master_df = load_master(raw_master)
-detail_df = load_detail(raw_detail)
-
-# FIX #2：全域計算 latest_km，tab1 / tab2 都可使用
-latest_km = int(master_df["里程"].max()) if not master_df.empty else 0
-
-# ─────────────────────────────────────────
-# 4. Session State 初始化
-# ─────────────────────────────────────────
-if "temp_items" not in st.session_state: st.session_state.temp_items = []
-if "edit_idx"   not in st.session_state: st.session_state.edit_idx   = None
-
-# ─────────────────────────────────────────
-# 5. Dialog：新增保養項目
-# ─────────────────────────────────────────
-@st.dialog("➕ 新增項目")
-def add_item_dialog():
-    PRESET = ["機油", "齒輪油", "空氣濾芯", "火星塞",
-              "煞車來令片", "傳動皮帶（CVT）", "輪胎",
-              "電瓶", "煞車油", "維修/自訂項目"]
-    item_type = st.selectbox("項目名稱", PRESET)
-
-    custom_name = ""
-    if item_type == "維修/自訂項目":
-        custom_name = st.text_input("請輸入自訂項目名稱")
-
-    c1, c2  = st.columns(2)
-    u_price = c1.number_input("單價", min_value=0, step=10)
-    u_qty   = c2.number_input("數量", min_value=1, value=1)
-
-    if st.button("確認加入", use_container_width=True):
-        final_name = (custom_name.strip()
-                      if item_type == "維修/自訂項目" and custom_name.strip()
-                      else item_type)
-        st.session_state.temp_items.append({
-            "item_name": final_name,
-            "price":     u_price,
-            "qty":       u_qty,
-            "total":     u_price * u_qty,
-        })
-        st.rerun()
-
-# ─────────────────────────────────────────
-# 6. Dialog：紀錄詳情 & 刪除
-#    FIX #3：全域定義，條件式內只呼叫
-# ─────────────────────────────────────────
+# 3. 詳情與編輯彈窗
 @st.dialog("📋 紀錄管理")
-def view_dialog(index: int):
-    row    = master_df.iloc[index]
-    row_id = str(row.get("id", ""))
-
-    st.write(f"📅 {row['日期'].strftime('%Y-%m-%d %H:%M')} | 📍 {row['里程']} km")
-    st.divider()
-
-    items = detail_df[detail_df["parent_id"] == row_id] if row_id else pd.DataFrame()
-    if not items.empty:
-        for _, item in items.iterrows():
-            st.markdown(f"**{item['item_name']}** : ${item['total']} ({item['qty']}x{item['price']})")
-    else:
-        st.info(str(row.get("細目", "無細項資料")))
-
-    st.divider()
-    if st.button("🗑️ 刪除這筆紀錄", type="secondary", use_container_width=True):
-        with st.spinner("刪除同步中..."):
-            try:
-                # FIX #4：同步刪除 service_details.csv 對應細項
-                latest_m, sha_m = get_atomic_data("data.csv")
-                latest_m = load_master(latest_m)
-
-                new_m = latest_m[latest_m["id"].astype(str) != row_id].reset_index(drop=True)
-                new_m["日期"] = new_m["日期"].dt.strftime("%Y-%m-%d %H:%M")
-                repo.update_file("data.csv", "Delete record", new_m.to_csv(index=False), sha_m)
-
-                if row_id:
-                    latest_d, sha_d = get_atomic_data("service_details.csv")
-                    latest_d = load_detail(latest_d)
-                    new_d = latest_d[latest_d["parent_id"] != row_id].reset_index(drop=True)
-                    repo.update_file("service_details.csv", "Delete details", new_d.to_csv(index=False), sha_d)
-
-                st.session_state.edit_idx = None
-                st.toast("紀錄已刪除")
-                time.sleep(0.5)
-                st.rerun()
-            except Exception as e:
-                st.error(f"刪除失敗：{e}")
-
-# FIX #3：全域呼叫
-if st.session_state.edit_idx is not None:
-    view_dialog(st.session_state.edit_idx)
-
-# ─────────────────────────────────────────
-# 7. 主介面
-# ─────────────────────────────────────────
-tab1, tab2 = st.tabs(["🏠 首頁", "➕ 新增紀錄"])
-
-# ── Tab 1：首頁 ──────────────────────────
-with tab1:
-    st.write(f"🛵 目前里程：**{latest_km} km**")
-
-    if st.button("🔄 同步雲端最新紀錄", use_container_width=True):
-        st.rerun()
-
-    for index, row in master_df.head(20).iterrows():
-        icon  = "⛽" if str(row["類別"]).strip() == "加油" else "🛠️"
-        label = f"{icon} {row['日期'].strftime('%m/%d %H:%M')} | ${int(row['金額'])}"
-        if st.button(label, key=f"r_{index}", use_container_width=True):
-            st.session_state.edit_idx = index
+def manage_dialog(index):
+    # 重新取得最新 row 數據避免類型跑掉
+    row = df.iloc[index]
+    
+    if st.session_state.dialog_mode == "view":
+        st.write(f"📅 **日期：** {row['日期'].strftime('%Y-%m-%d %H:%M')}")
+        st.write(f"🏷️ **類別：** {row['類別']} | 📍 {row['里程']} km")
+        if row['類別'] == '保養' and row['店家']: st.write(f"🏠 **店家：** {row['店家']}")
+        st.success(f"💰 **金額：** ${int(row['金額'])}")
+        st.divider()
+        st.write("**明細：**")
+        st.info(row['細目'])
+        if row['備註'] and row['備註'] != 'nan': st.write(f"💬 備註：{row['備註']}")
+        
+        st.divider()
+        c1, c2 = st.columns(2)
+        if c1.button("📝 編輯紀錄", use_container_width=True):
+            st.session_state.dialog_mode = "edit"
+            st.rerun()
+        if c2.button("🗑️ 刪除紀錄", use_container_width=True, type="secondary"):
+            new_df = df.drop(index).reset_index(drop=True)
+            new_df['日期'] = new_df['日期'].dt.strftime('%Y-%m-%d %H:%M')
+            repo.update_file(FILE_PATH, "Delete", new_df.to_csv(index=False), repo.get_contents(FILE_PATH).sha)
+            st.cache_data.clear()
+            st.session_state.edit_idx = None
             st.rerun()
 
-# ── Tab 2：新增紀錄 ──────────────────────
+    else: # 編輯模式
+        with st.form("edit_mode_form"):
+            st.write("🔧 **正在編輯紀錄**")
+            # 處理備註內容，如果是 'nan' 就顯示空白
+            current_note = "" if str(row['備註']) == 'nan' else str(row['備註'])
+            
+            e_date = st.date_input("日期", row['日期'].date())
+            e_time = st.time_input("時間", row['日期'].time())
+            e_km = st.number_input("里程 (km)", value=int(row['里程']))
+            e_amt = st.number_input("金額 ($)", value=int(row['金額']))
+            e_note = st.text_area("備註", value=current_note)
+            
+            # 初始化暫存變數
+            e_miss = str(row['漏記'])
+            e_shop = "" if str(row['店家']) == 'nan' else str(row['店家'])
+            e_detail = str(row['細目'])
+            
+            if row['類別'] == "加油":
+                original_type = row['細目'].split('/')[0] if '/' in str(row['細目']) else "95無鉛"
+                e_type = st.selectbox("修改油種", list(GAS_PRICES.keys()), 
+                                    index=list(GAS_PRICES.keys()).index(original_type) if original_type in GAS_PRICES else 1)
+                e_miss_bool = st.checkbox("漏記標記 (不計入油耗)", value=(str(row['漏記']) == "Yes"))
+                e_miss = "Yes" if e_miss_bool else "No"
+                new_L = round(e_amt / GAS_PRICES[e_type], 2) if e_amt > 0 else 0.0
+                e_detail = f"{e_type}/{new_L}L"
+            else:
+                e_shop = st.text_input("施工店家", value=e_shop)
+                e_detail = st.text_area("維修明細", value=e_detail)
+
+            if st.form_submit_button("💾 儲存更新", use_container_width=True):
+                full_dt = datetime.combine(e_date, e_time).strftime('%Y-%m-%d %H:%M')
+                
+                # 🛡️ 再次確保數據為正確類型再寫入
+                new_data_row = {
+                    '日期': pd.to_datetime(full_dt),
+                    '類別': str(row['類別']),
+                    '里程': int(e_km),
+                    '金額': int(e_amt),
+                    '細目': str(e_detail),
+                    '漏記': str(e_miss),
+                    '備註': str(e_note),
+                    '店家': str(e_shop)
+                }
+                
+                for k, v in new_data_row.items():
+                    df.at[index, k] = v
+                
+                final_df = df.sort_values("日期", ascending=False)
+                final_df['日期'] = final_df['日期'].dt.strftime('%Y-%m-%d %H:%M')
+                repo.update_file(FILE_PATH, "Edit", final_df.to_csv(index=False), repo.get_contents(FILE_PATH).sha)
+                st.cache_data.clear()
+                st.session_state.edit_idx = None
+                st.session_state.dialog_mode = "view"
+                st.rerun()
+        
+        if st.button("⬅️ 返回不儲存", use_container_width=True):
+            st.session_state.dialog_mode = "view"
+            st.rerun()
+
+if st.session_state.edit_idx is not None: manage_dialog(st.session_state.edit_idx)
+
+# --- 介面佈局 ---
+tab1, tab2 = st.tabs(["🏠 首頁", "➕ 新增紀錄"])
+
+with tab1:
+    st.write("🛵 <span style='font-size: 13px; color: gray;'>小迪</span>", unsafe_allow_html=True)
+    
+    avg_eff = "--"
+    gas_only = df[df['類別'] == '加油'].copy().reset_index(drop=True)
+    if len(gas_only) >= 2 and str(gas_only.iloc[0]['漏記']) != 'Yes':
+        try:
+            curr_km = float(gas_only.iloc[0]['里程'])
+            prev_km = float(gas_only.iloc[1]['里程'])
+            match = re.search(r"(\d+\.?\d*)L", str(gas_only.iloc[1]['細目']))
+            if match:
+                prev_liters = float(match.group(1))
+                if prev_liters > 0: avg_eff = f"{round((curr_km - prev_km) / prev_liters, 1)}"
+        except: avg_eff = "--"
+
+    latest_km = df['里程'].max() if not df.empty else 0
+    dashboard_html = f"""
+    <div style="display: flex; gap: 8px; margin: 5px 0 15px 0;">
+        <div style="flex: 1; background: white; padding: 15px 10px; border-radius: 12px; border: 1px solid #f0f2f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); text-align: center;">
+            <div style="font-size: 12px; color: #666;">目前里程</div>
+            <div style="font-size: 22px; font-weight: 800; color: #31333F;">{latest_km} <span style="font-size: 13px;">km</span></div>
+        </div>
+        <div style="flex: 1; background: white; padding: 15px 10px; border-radius: 12px; border: 1px solid #f0f2f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); text-align: center;">
+            <div style="font-size: 12px; color: #666;">平均油耗</div>
+            <div style="font-size: 22px; font-weight: 800; color: #31333F;">{avg_eff} <span style="font-size: 14px;">km/L</span></div>
+        </div>
+    </div>
+    """
+    st.markdown(dashboard_html, unsafe_allow_html=True)
+    
+    st.write("📖 **活動紀錄**")
+    items_per_page = 10
+    total_pages = max((len(df) // items_per_page) + (1 if len(df) % items_per_page > 0 else 0), 1)
+    page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1) if total_pages > 1 else 1
+    
+    for index, row in df.iloc[(page-1)*items_per_page : page*items_per_page].iterrows():
+        icon = "⛽" if str(row['類別']) == '加油' else "🛠️"
+        miss_tag = " ⚠️" if str(row['漏記']) == 'Yes' else ""
+        label = f"{icon} {row['日期'].strftime('%m/%d %H:%M')} | {row['里程']}k | ${int(row['金額'])}{miss_tag}"
+        if st.button(label, key=f"rec_{index}", use_container_width=True):
+            st.session_state.edit_idx = index
+            st.session_state.dialog_mode = "view"
+            st.rerun()
+
 with tab2:
-    mode = st.radio("類別", ["⛽ 加油", "🛠️ 保養維修"], horizontal=True)
-
-    # FIX #1：save_trigger 在 form 外預先初始化
-    save_trigger = False
-    total_sum    = 0
-
+    mode = st.radio("選擇紀錄類型", ["⛽ 加油", "🛠️ 保養維修"], horizontal=True)
+    now = datetime.now(TAIPEI_TZ)
     with st.form("main_form", clear_on_submit=True):
+        st.text_input("Focus", label_visibility="collapsed")
         c1, c2 = st.columns(2)
-        a_date = c1.date_input("日期", datetime.now(TAIPEI_TZ).date())
-        a_time = c2.time_input("時間", datetime.now(TAIPEI_TZ).time())
-        a_km   = st.number_input("里程 (km)", value=latest_km, min_value=0)
-        a_shop = st.text_input("店家 (選填)") if mode == "🛠️ 保養維修" else ""
+        a_date = c1.date_input("日期", now.date())
+        a_time = c2.time_input("時間", now.time())
+        a_km = st.number_input("目前里程 (km)", min_value=0, value=int(latest_km))
+        a_shop = st.text_input("施工店家 (選填)") if mode == "🛠️ 保養維修" else ""
         a_note = st.text_area("備註 (選填)")
 
         if mode == "⛽ 加油":
             a_type = st.selectbox("油種", list(GAS_PRICES.keys()))
-            a_amt  = st.number_input("金額 ($)", min_value=0)
+            a_amt = st.number_input("加油金額 ($)", min_value=0, step=10)
+            a_miss = st.checkbox("本次紀錄前有漏掉次數")
+            calc_L = round(a_amt / GAS_PRICES[a_type], 2) if a_amt > 0 else 0.0
+            st.info(f"💡 自動換算：{calc_L} L")
             if st.form_submit_button("🚀 儲存加油", use_container_width=True):
-                with st.spinner("存檔同步中..."):
-                    try:
-                        real_m, sha_m = get_atomic_data("data.csv")
-                        real_m = load_master(real_m)
-                        full_dt = datetime.combine(a_date, a_time).strftime("%Y-%m-%d %H:%M")
-                        calc_L  = round(a_amt / GAS_PRICES[a_type], 2) if a_amt > 0 else 0.0
-                        new_row = {
-                            "日期": full_dt, "類別": "加油",
-                            "里程": a_km,    "金額": a_amt,
-                            "細目": f"{a_type}/{calc_L}L",
-                            "漏記": "No",    "備註": a_note,
-                            "店家": "",      "id": str(uuid.uuid4()),
-                        }
-                        updated_m = pd.concat([real_m, pd.DataFrame([new_row])], ignore_index=True)
-                        repo.update_file("data.csv", "Add Gas", updated_m.to_csv(index=False), sha_m)
-                        st.toast("加油紀錄存檔成功！")
-                        time.sleep(0.5)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"儲存失敗：{e}")
-        else:
-            # FIX #1：在 form 內賦值
-            save_trigger = st.form_submit_button("💾 儲存保養紀錄", use_container_width=True)
-
-    # ── 保養項目管理（form 外）────────────
-    if mode == "🛠️ 保養維修":
-        if st.button("➕ 新增零件項目", use_container_width=True):
-            add_item_dialog()
-
-        if st.session_state.temp_items:
-            for i, item in enumerate(st.session_state.temp_items):
-                col_item, col_del = st.columns([5, 1])
-                col_item.markdown(
-                    f'<div class="service-item-box">'
-                    f'<b>{item["item_name"]}</b> <b>${item["total"]}</b>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                # FIX #9：支援刪除單一項目
-                if col_del.button("✕", key=f"del_{i}"):
-                    st.session_state.temp_items.pop(i)
-                    st.rerun()
-                total_sum += item["total"]
-
-            st.write(f"### 總計：${total_sum}")
-            if st.button("🗑️ 清空暫存項目", type="secondary", use_container_width=True):
-                st.session_state.temp_items = []
+                new_row = {"日期": datetime.combine(a_date, a_time).strftime('%Y-%m-%d %H:%M'), "類別": "加油", "里程": a_km, "金額": a_amt, "細目": f"{a_type}/{calc_L}L", "漏記": "Yes" if a_miss else "No", "備註": a_note, "店家": ""}
+                new_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                repo.update_file(FILE_PATH, "Add", new_df.sort_values("日期", ascending=False).to_csv(index=False), repo.get_contents(FILE_PATH).sha)
+                st.cache_data.clear()
                 st.rerun()
-
-        # FIX #1：save_trigger 已安全初始化，此處不會 NameError
-        if save_trigger:
-            if not st.session_state.temp_items:
-                st.error("清單為空，請先新增零件")
-            else:
-                with st.spinner("📦 雙檔案同步存檔中..."):
-                    try:
-                        real_m, sha_m = get_atomic_data("data.csv")
-                        real_d, sha_d = get_atomic_data("service_details.csv")
-                        real_m = load_master(real_m)
-                        real_d = load_detail(real_d)
-
-                        rec_id  = str(uuid.uuid4())
-                        full_dt = datetime.combine(a_date, a_time).strftime("%Y-%m-%d %H:%M")
-                        summary = ", ".join([i["item_name"] for i in st.session_state.temp_items])
-
-                        new_m_row = {
-                            "日期": full_dt, "類別": "保養",
-                            "里程": a_km,    "金額": total_sum,
-                            "細目": summary, "漏記": "No",
-                            "備註": a_note,  "店家": a_shop,
-                            "id":   rec_id,
-                        }
-                        updated_m = pd.concat([real_m, pd.DataFrame([new_m_row])], ignore_index=True)
-
-                        new_details = [dict(item, parent_id=rec_id)
-                                       for item in st.session_state.temp_items]
-                        updated_d = pd.concat([real_d, pd.DataFrame(new_details)], ignore_index=True)
-
-                        # FIX #5：各自取最新 SHA 再推送
-                        repo.update_file("data.csv",            "Sync Master",  updated_m.to_csv(index=False), sha_m)
-                        repo.update_file("service_details.csv", "Sync Details", updated_d.to_csv(index=False), sha_d)
-
-                        st.session_state.temp_items = []
-                        st.toast("保養紀錄同步成功！")
-                        time.sleep(0.5)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"儲存失敗：{e}")
+        else:
+            a_items = st.text_area("保養項目", placeholder="機油 450")
+            a_total = st.number_input("總計金額 ($)", min_value=0)
+            if st.form_submit_button("💾 儲存保養", use_container_width=True):
+                new_row = {"日期": datetime.combine(a_date, a_time).strftime('%Y-%m-%d %H:%M'), "類別": "保養", "里程": a_km, "金額": a_total, "細目": a_items.replace("\n", ", "), "漏記": "No", "備註": a_note, "店家": a_shop}
+                new_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                repo.update_file(FILE_PATH, "Service", new_df.sort_values("日期", ascending=False).to_csv(index=False), repo.get_contents(FILE_PATH).sha)
+                st.cache_data.clear()
+                st.rerun()
