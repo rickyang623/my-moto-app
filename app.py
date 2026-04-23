@@ -7,9 +7,9 @@ import re
 import pytz
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v18", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v18.1", page_icon="🛵", layout="centered")
 
-# --- CSS 魔法：美化清單與表單 ---
+# --- CSS 魔法：美化清單、表單與儀表板 ---
 st.markdown("""
 <style>
     /* 讓紀錄列看起來像 App 的卡片清單 */
@@ -36,6 +36,13 @@ st.markdown("""
         padding: 0px !important;
         margin: 0px !important;
         opacity: 0 !important;
+    }
+    /* 優化 Metric 顯示空間 */
+    [data-testid="stMetric"] {
+        background-color: #ffffff;
+        padding: 10px;
+        border-radius: 10px;
+        border: 1px solid #f0f2f6;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -67,14 +74,12 @@ df, file_sha = load_data()
 if 'edit_idx' not in st.session_state:
     st.session_state.edit_idx = None
 
-# 3. 彈窗編輯 (加入焦點轉移)
+# 3. 彈窗編輯
 @st.dialog("📝 編輯紀錄")
 def edit_dialog(index):
     row_data = df.iloc[index]
     with st.form("edit_form"):
-        # 🛡️ 焦點轉移器：搶走系統焦點，防止日期自動彈出
         st.text_input("Focus Grabber", label_visibility="collapsed", key="f_grabber")
-        
         f_date = st.date_input("日期", row_data['日期'].date())
         f_time = st.time_input("時間", row_data['日期'].time())
         f_type = st.selectbox("油種", list(GAS_PRICES.keys()))
@@ -119,22 +124,24 @@ tab1, tab2 = st.tabs(["🏠 首頁", "⛽ 新增加油"])
 with tab1:
     st.write("🛵 <span style='font-size: 14px; color: gray;'>小迪</span>", unsafe_allow_html=True)
     
-    # 儀表板數據
+    # 計算油耗
     avg_eff = "--"
     latest_km = df['里程'].max() if not df.empty else 0
     if len(df) >= 2 and df.iloc[0]['漏記'] == 'No':
         try:
             prev_liters = float(re.findall(r"(\d+\.\d+)L", df.iloc[1]['細目'])[0])
-            avg_eff = f"{round((df.iloc[0]['里程'] - df.iloc[1]['里程']) / prev_liters, 2)} km/L"
+            avg_eff = f"{round((df.iloc[0]['里程'] - df.iloc[1]['里程']) / prev_liters, 1)}"
         except: pass
 
+    # --- 關鍵修改：數據並列 ---
     m_col1, m_col2 = st.columns(2)
+    # 使用 metric 呈現，並加上單位在 label 或 value 中
     m_col1.metric("目前里程", f"{latest_km} km")
-    m_col2.metric("平均油耗", avg_eff)
+    m_col2.metric("平均油耗", f"{avg_eff} km/L" if avg_eff != "--" else "--")
     
     st.divider()
-    st.subheader("📋 紀錄")
     
+    # --- 紀錄清單 ---
     items_per_page = 8
     total_pages = max((len(df) // items_per_page) + (1 if len(df) % items_per_page > 0 else 0), 1)
     page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1) if total_pages > 1 else 1
@@ -147,9 +154,7 @@ with tab1:
         amt = f"${row['金額']}"
         oil = row['細目'].split('/')[0]
         
-        # 組合顯示內容
         btn_label = f"{dt}{miss} | {km} | {amt} | {oil}"
-        
         if st.button(btn_label, key=f"rec_{index}", use_container_width=True):
             st.session_state.edit_idx = index
             st.rerun()
@@ -158,9 +163,7 @@ with tab2:
     st.subheader("⛽ 加油紀錄")
     now_taipei = datetime.now(TAIPEI_TZ)
     with st.form("add_form", clear_on_submit=True):
-        # 這裡同樣可以加入焦點轉移，如果你不希望新增加油也彈出行事曆
         st.text_input("Focus Grabber", label_visibility="collapsed", key="add_grabber")
-        
         col_d, col_t = st.columns(2)
         a_date = col_d.date_input("日期", now_taipei.date())
         a_time = col_t.time_input("時間", now_taipei.time())
