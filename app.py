@@ -8,9 +8,9 @@ import pytz
 import base64
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v21", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v21.1", page_icon="🛵", layout="centered")
 
-# --- CSS 魔法：行動版優化 ---
+# --- CSS 魔法 ---
 st.markdown("""
 <style>
     div.stButton > button:first-child {
@@ -26,10 +26,7 @@ st.markdown("""
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
         border-radius: 10px !important;
     }
-    /* 隱藏焦點轉移器 */
     .stTextInput { height: 0px !important; padding: 0px !important; margin: 0px !important; opacity: 0 !important; }
-    /* 讓文字區域在手機上更明顯 */
-    .stTextArea textarea { font-size: 16px !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -63,7 +60,7 @@ if 'edit_idx' not in st.session_state: st.session_state.edit_idx = None
 def img_to_b64(file):
     return base64.b64encode(file.getvalue()).decode() if file else ""
 
-# 3. 詳情查看彈窗
+# 3. 詳情查看彈窗 (加入圖片容錯)
 @st.dialog("📝 紀錄詳情")
 def view_dialog(index):
     row = df.iloc[index]
@@ -75,8 +72,13 @@ def view_dialog(index):
     st.write("**項目明細：**")
     st.info(row['細目'])
     if row['備註']: st.write(f"💬 備註：{row['備註']}")
-    if row['照片']:
-        st.image(base64.b64decode(row['照片']), use_container_width=True)
+    
+    # 🖼️ 圖片顯示容錯處理
+    if row['照片'] and str(row['照片']).strip() != "":
+        try:
+            st.image(base64.b64decode(row['照片']), use_container_width=True)
+        except Exception as e:
+            st.warning("⚠️ 圖片損壞或格式不支援，無法顯示")
     
     if st.button("🗑️ 刪除紀錄", use_container_width=True, type="secondary"):
         new_df = df.drop(index).reset_index(drop=True)
@@ -94,14 +96,23 @@ tab1, tab2 = st.tabs(["🏠 首頁", "➕ 新增紀錄"])
 with tab1:
     st.write("🛵 <span style='font-size: 13px; color: gray;'>小迪</span>", unsafe_allow_html=True)
     
-    # 儀表板 (強制橫向 Flexbox)
-    gas_df = df[df['類別'] == '加油'].copy()
+    # ⛽ 油耗計算核心邏輯優化
     avg_eff = "--"
-    if len(gas_df) >= 2 and gas_df.iloc[0]['漏記'] == 'No':
-        try:
-            prev_liters = float(re.findall(r"(\d+\.\d+)L", gas_df.iloc[1]['細目'])[0])
-            avg_eff = f"{round((gas_df.iloc[0]['里程'] - gas_df.iloc[1]['里程']) / prev_liters, 1)}"
-        except: pass
+    # 只取出「加油」類別進行計算
+    gas_only_df = df[df['類別'] == '加油'].reset_index(drop=True)
+    
+    if len(gas_only_df) >= 2:
+        # 檢查最新的加油紀錄是否有標記「漏記」
+        if gas_only_df.iloc[0]['漏記'] == 'No':
+            try:
+                # 抓取最近兩次加油的里程與上一次的公升數
+                curr_km = gas_only_df.iloc[0]['里程']
+                prev_km = gas_only_df.iloc[1]['里程']
+                # 解析上一次加油的公升數
+                prev_liters = float(re.findall(r"(\d+\.\d+)L", gas_only_df.iloc[1]['細目'])[0])
+                avg_eff = f"{round((curr_km - prev_km) / prev_liters, 1)}"
+            except:
+                avg_eff = "--"
 
     latest_km = df['里程'].max() if not df.empty else 0
     dashboard_html = f"""
@@ -129,7 +140,6 @@ with tab1:
         dt = row['日期'].strftime('%m/%d %H:%M')
         km = f"{row['里程']}k"
         amt = f"${int(row['金額'])}"
-        
         if st.button(f"{icon} {dt} | {km} | {amt}", key=f"rec_{index}", use_container_width=True):
             st.session_state.edit_idx = index
             st.rerun()
@@ -146,7 +156,7 @@ with tab2:
         a_km = st.number_input("目前里程 (km)", min_value=0, value=int(latest_km))
         a_shop = st.text_input("施工店家 (選填)")
         a_photo = st.file_uploader("新增照片", type=['png', 'jpg', 'jpeg'])
-        a_note = st.text_area("備註 (選填)", placeholder="例如：下次建議更換皮帶")
+        a_note = st.text_area("備註 (選填)")
 
         if mode == "⛽ 加油":
             a_type = st.selectbox("油種", list(GAS_PRICES.keys()))
@@ -166,9 +176,8 @@ with tab2:
 
         else: # 保養模式
             st.write("🔧 **維修項目明細**")
-            # 捨棄表格編輯器，改用大文字方塊
-            a_items = st.text_area("保養項目 (建議每行一項)", placeholder="機油 450\n齒輪油 50\n輪胎 1800", height=120)
-            a_total = st.number_input("總計總金額 ($)", min_value=0, value=0, help="請輸入本次結帳的總金額")
+            a_items = st.text_area("保養項目 (每行一項)", placeholder="機油 450\n齒輪油 50")
+            a_total = st.number_input("總計總金額 ($)", min_value=0, value=0)
             
             if st.form_submit_button("💾 儲存保養紀錄", use_container_width=True):
                 if not a_items or a_total == 0:
