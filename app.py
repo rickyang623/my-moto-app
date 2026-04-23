@@ -7,30 +7,36 @@ import re
 import pytz
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v17", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v18", page_icon="🛵", layout="centered")
 
-# --- CSS 魔法：美化全寬度按鈕紀錄列 ---
+# --- CSS 魔法：美化清單與表單 ---
 st.markdown("""
 <style>
-    /* 讓按鈕看起來像清單列而非傳統按鈕 */
+    /* 讓紀錄列看起來像 App 的卡片清單 */
     div.stButton > button:first-child {
         background-color: white !important;
         color: #31333F !important;
         border: 1px solid #f0f2f6 !important;
-        padding: 10px 15px !important;
+        padding: 12px 15px !important;
         text-align: left !important;
         display: block !important;
         width: 100% !important;
         margin-bottom: -10px !important;
         transition: 0.2s;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        border-radius: 10px !important;
     }
     div.stButton > button:hover {
         border-color: #ff4b4b !important;
         background-color: #fffafb !important;
     }
-    .tag-km { color: #28a745; font-weight: bold; }
-    .tag-amt { color: #007bff; font-weight: bold; }
+    /* 隱藏焦點轉移器的輸入框 */
+    .stTextInput {
+        height: 0px !important;
+        padding: 0px !important;
+        margin: 0px !important;
+        opacity: 0 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -39,7 +45,7 @@ FILE_PATH = "data.csv"
 GAS_PRICES = {"92無鉛": 32.4, "95無鉛": 33.9, "98無鉛": 35.9}
 TAIPEI_TZ = pytz.timezone('Asia/Taipei')
 
-# 2. 登入 GitHub 與載入資料
+# 2. 登入 GitHub
 try:
     g = Github(st.secrets["GITHUB_TOKEN"])
     repo = g.get_repo(REPO_NAME)
@@ -58,15 +64,17 @@ def load_data():
 
 df, file_sha = load_data()
 
-# 初始化編輯狀態
 if 'edit_idx' not in st.session_state:
     st.session_state.edit_idx = None
 
-# 3. 彈窗編輯函式
+# 3. 彈窗編輯 (加入焦點轉移)
 @st.dialog("📝 編輯紀錄")
 def edit_dialog(index):
     row_data = df.iloc[index]
     with st.form("edit_form"):
+        # 🛡️ 焦點轉移器：搶走系統焦點，防止日期自動彈出
+        st.text_input("Focus Grabber", label_visibility="collapsed", key="f_grabber")
+        
         f_date = st.date_input("日期", row_data['日期'].date())
         f_time = st.time_input("時間", row_data['日期'].time())
         f_type = st.selectbox("油種", list(GAS_PRICES.keys()))
@@ -102,7 +110,6 @@ def edit_dialog(index):
         st.session_state.edit_idx = None
         st.rerun()
 
-# 檢查是否開啟編輯窗
 if st.session_state.edit_idx is not None:
     edit_dialog(st.session_state.edit_idx)
 
@@ -112,7 +119,7 @@ tab1, tab2 = st.tabs(["🏠 首頁", "⛽ 新增加油"])
 with tab1:
     st.write("🛵 <span style='font-size: 14px; color: gray;'>小迪</span>", unsafe_allow_html=True)
     
-    # 儀表數據計算
+    # 儀表板數據
     avg_eff = "--"
     latest_km = df['里程'].max() if not df.empty else 0
     if len(df) >= 2 and df.iloc[0]['漏記'] == 'No':
@@ -133,19 +140,16 @@ with tab1:
     page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1) if total_pages > 1 else 1
     
     start_idx = (page - 1) * items_per_page
-    
-    # 渲染紀錄清單
     for index, row in df.iloc[start_idx : start_idx + items_per_page].iterrows():
         dt = row['日期'].strftime('%m/%d %H:%M')
-        miss = "⚠️" if row['漏記'] == 'Yes' else ""
+        miss = " ⚠️" if row['漏記'] == 'Yes' else ""
         km = f"{row['里程']}k"
         amt = f"${row['金額']}"
         oil = row['細目'].split('/')[0]
         
-        # 關鍵：將內容組合成一個單一的字串作為按鈕 Label
+        # 組合顯示內容
         btn_label = f"{dt}{miss} | {km} | {amt} | {oil}"
         
-        # 每個紀錄都是一個佔滿寬度的按鈕
         if st.button(btn_label, key=f"rec_{index}", use_container_width=True):
             st.session_state.edit_idx = index
             st.rerun()
@@ -154,6 +158,9 @@ with tab2:
     st.subheader("⛽ 加油紀錄")
     now_taipei = datetime.now(TAIPEI_TZ)
     with st.form("add_form", clear_on_submit=True):
+        # 這裡同樣可以加入焦點轉移，如果你不希望新增加油也彈出行事曆
+        st.text_input("Focus Grabber", label_visibility="collapsed", key="add_grabber")
+        
         col_d, col_t = st.columns(2)
         a_date = col_d.date_input("日期", now_taipei.date())
         a_time = col_t.time_input("時間", now_taipei.time())
