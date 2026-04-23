@@ -5,14 +5,14 @@ from datetime import datetime, date
 import io
 import re
 
-# 1. 頁面配置 (RWD 原則)
-st.set_page_config(page_title="MyMoto99 v11", page_icon="🛵", layout="centered")
+# 1. 頁面配置
+st.set_page_config(page_title="MyMoto99 v12", page_icon="🛵", layout="centered")
 
 REPO_NAME = "rickyang623/my-moto-app"
 FILE_PATH = "data.csv"
 GAS_PRICES = {"92無鉛": 32.4, "95無鉛": 33.9, "98無鉛": 35.9}
 
-# 2. 登入 GitHub 與讀取資料
+# 2. 登入 GitHub
 try:
     g = Github(st.secrets["GITHUB_TOKEN"])
     repo = g.get_repo(REPO_NAME)
@@ -28,7 +28,7 @@ def load_data():
 
 df, file_sha = load_data()
 
-# 3. 彈窗編輯函式
+# 3. 彈窗編輯與刪除函式
 @st.dialog("📝 編輯紀錄")
 def edit_dialog(index, row_data):
     try:
@@ -45,7 +45,10 @@ def edit_dialog(index, row_data):
         calc_L = round(f_amt / GAS_PRICES[f_type], 2) if f_amt > 0 else 0.0
         st.info(f"💡 自動換算：{calc_L} L")
         
-        if st.form_submit_button("💾 確認更新", use_container_width=True):
+        col_save, col_del = st.columns(2)
+        save_btn = col_save.form_submit_button("💾 確認更新", use_container_width=True)
+        
+        if save_btn:
             df.iloc[index] = {
                 "日期": str(f_date), "類別": "加油", "里程": f_km, "金額": f_amt, "細目": f"{f_type}/{calc_L}L"
             }
@@ -54,21 +57,28 @@ def edit_dialog(index, row_data):
             st.cache_data.clear()
             st.rerun()
 
+    # 在 Form 之外放置刪除按鈕，避免與提交邏輯混淆
+    st.write("---")
+    st.write("🧨 危險區域")
+    if st.button("🗑️ 刪除這整筆紀錄", use_container_width=True, type="secondary"):
+        # 執行刪除邏輯
+        new_df = df.drop(index).reset_index(drop=True)
+        repo.update_file(FILE_PATH, f"Delete log at index {index}", new_df.to_csv(index=False), repo.get_contents(FILE_PATH).sha)
+        st.warning("紀錄已刪除")
+        st.cache_data.clear()
+        st.rerun()
+
 # --- 介面佈局 ---
-# 1.「紀錄表」改為「首頁」
 tab1, tab2 = st.tabs(["🏠 首頁", "⛽ 新增加油"])
 
 with tab1:
-    # 2. 移除數據中心，3. 小迪字體縮小
     st.write("🛵 <span style='font-size: 18px;'>小迪</span>", unsafe_allow_html=True)
     
-    # 4. 計算里程與油耗
+    # 油耗計算
     if not df.empty and len(df) >= 2:
         sorted_df = df.sort_values("里程", ascending=False).reset_index(drop=True)
         latest_km = sorted_df.iloc[0]['里程']
         prev_km = sorted_df.iloc[1]['里程']
-        
-        # 從細目中提取上次加油的公升數 (正則表達式)
         prev_detail = sorted_df.iloc[1]['細目']
         try:
             prev_liters = float(re.findall(r"(\d+\.\d+)L", prev_detail)[0])
@@ -79,14 +89,11 @@ with tab1:
         latest_km = df['里程'].max() if not df.empty else 0
         avg_efficiency = 0.0
 
-    # 儀表板顯示
     m_col1, m_col2 = st.columns(2)
     m_col1.metric("目前總里程", f"{latest_km} km")
     m_col2.metric("平均油耗", f"{avg_efficiency} km/L")
     
     st.divider()
-    
-    # 紀錄清單
     st.subheader("📋 紀錄")
     search_query = st.text_input("🔍 搜尋：", placeholder="日期、里程...")
     
@@ -94,14 +101,12 @@ with tab1:
 
     for index, row in filtered_df.sort_values("日期", ascending=False).iterrows():
         with st.container(border=True):
-            col_top1, col_top2 = st.columns([1, 1])
-            col_top1.write(f"📅 **{row['日期']}**")
-            col_top2.write(f"💰 **${row['金額']}**")
-            
-            col_mid1, col_mid2 = st.columns([1, 1])
-            col_mid1.write(f"📍 `{row['里程']} km`")
-            col_mid2.write(f"⛽ {row['細目']}")
-            
+            col_t1, col_t2 = st.columns([1, 1])
+            col_t1.write(f"📅 **{row['日期']}**")
+            col_t2.write(f"💰 **${row['金額']}**")
+            col_m1, col_m2 = st.columns([1, 1])
+            col_m1.write(f"📍 `{row['里程']} km`")
+            col_m2.write(f"⛽ {row['細目']}")
             if st.button("編輯紀錄", key=f"btn_{index}", use_container_width=True):
                 edit_dialog(index, row)
 
@@ -111,33 +116,20 @@ with tab2:
         a_date = st.date_input("加油日期", date.today())
         a_type = st.selectbox("加油種類", list(GAS_PRICES.keys()))
         a_amt = st.number_input("加油金額 ($)", min_value=0, step=10)
-        # 讓預設值等於目前里程，減少輸入負擔
         a_km = st.number_input("當前里程 (km)", min_value=0, value=int(latest_km))
         
-        a_calc_L = round(a_amt / GAS_PRICES[f_type if 'f_type' in locals() else a_type], 2) if a_amt > 0 else 0.0
+        a_calc_L = round(a_amt / GAS_PRICES[a_type], 2) if a_amt > 0 else 0.0
         st.info(f"💡 自動換算公升數: **{a_calc_L} L**")
         
         if st.form_submit_button("🚀 儲存紀錄", use_container_width=True):
-            # --- 核心檢核邏輯 ---
-            if a_km <= latest_km:
-                st.error(f"❌ 錯誤：輸入里程 ({a_km} km) 不可小於或等於目前總里程 ({latest_km} km)！")
-                st.toast("儲存失敗，請檢查里程數", icon="🚫")
+            if a_km <= latest_km and not df.empty:
+                st.error(f"❌ 里程不可少於目前總里程 ({latest_km} km)")
             elif a_amt <= 0:
-                st.error("❌ 錯誤：加油金額必須大於 0 元！")
+                st.error("❌ 金額需大於 0")
             else:
-                # 檢核通過，執行儲存
-                new_data = pd.DataFrame([{
-                    "日期": str(a_date), 
-                    "類別": "加油", 
-                    "里程": a_km, 
-                    "金額": a_amt, 
-                    "細目": f"{a_type}/{a_calc_L}L"
-                }])
+                new_data = pd.DataFrame([{"日期": str(a_date), "類別": "加油", "里程": a_km, "金額": a_amt, "細目": f"{a_type}/{a_calc_L}L"}])
                 new_df = pd.concat([df, new_data], ignore_index=True)
-                
-                with st.spinner("同步至 GitHub 中..."):
-                    repo.update_file(FILE_PATH, f"Add log: {a_km}km", new_df.to_csv(index=False), file_sha)
-                
-                st.success(f"🎉 儲存成功！目前總里程更新為 {a_km} km")
+                repo.update_file(FILE_PATH, f"Add log: {a_km}km", new_df.to_csv(index=False), file_sha)
+                st.success("儲存成功")
                 st.cache_data.clear()
                 st.rerun()
