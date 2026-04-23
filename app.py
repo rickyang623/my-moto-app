@@ -7,7 +7,7 @@ import re
 import pytz
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v22", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v22.1", page_icon="🛵", layout="centered")
 
 # --- CSS 魔法 ---
 st.markdown("""
@@ -46,7 +46,6 @@ except:
 def load_data():
     file_content = repo.get_contents(FILE_PATH)
     data = pd.read_csv(io.StringIO(file_content.decoded_content.decode('utf-8')))
-    # 確保基本欄位完整 (移除照片)
     for col in ['漏記', '備註', '店家', '類別']:
         if col not in data.columns: data[col] = 'No' if col == '漏記' else ''
     data['日期'] = pd.to_datetime(data['日期'])
@@ -55,7 +54,6 @@ def load_data():
 
 df, file_sha_val = load_data()
 
-# 初始化狀態
 if 'edit_idx' not in st.session_state: st.session_state.edit_idx = None
 if 'dialog_mode' not in st.session_state: st.session_state.dialog_mode = "view"
 
@@ -96,19 +94,25 @@ def manage_dialog(index):
             e_amt = st.number_input("金額 ($)", value=int(row['金額']))
             e_note = st.text_area("備註", value=str(row['備註']))
             
-            # 準備更新欄位
             e_miss = row['漏記']
             e_shop = row['店家']
             e_detail = row['細目']
             
             if row['類別'] == "加油":
+                # 解析原本的油種 (例如 "95無鉛/10.2L" -> "95無鉛")
+                original_type = row['細目'].split('/')[0] if '/' in row['細目'] else "95無鉛"
+                e_type = st.selectbox("修改油種", list(GAS_PRICES.keys()), index=list(GAS_PRICES.keys()).index(original_type) if original_type in GAS_PRICES else 1)
+                
                 e_miss_bool = st.checkbox("漏記標記 (不計入油耗)", value=(row['漏記'] == "Yes"))
                 e_miss = "Yes" if e_miss_bool else "No"
+                
+                # 在按下儲存時會根據 e_amt 和 e_type 重新算 L
+                new_L = round(e_amt / GAS_PRICES[e_type], 2) if e_amt > 0 else 0.0
+                e_detail = f"{e_type}/{new_L}L"
             else:
                 e_shop = st.text_input("施工店家", value=str(row['店家']))
                 e_detail = st.text_area("維修明細", value=str(row['細目']))
 
-            # 表單內的儲存按鈕
             if st.form_submit_button("💾 儲存更新", use_container_width=True):
                 full_dt = datetime.combine(e_date, e_time).strftime('%Y-%m-%d %H:%M')
                 df.loc[index, '日期'] = pd.to_datetime(full_dt)
@@ -127,7 +131,6 @@ def manage_dialog(index):
                 st.session_state.dialog_mode = "view"
                 st.rerun()
         
-        # 退出編輯按鈕 (放在 form 外面)
         if st.button("⬅️ 返回不儲存", use_container_width=True):
             st.session_state.dialog_mode = "view"
             st.rerun()
