@@ -8,25 +8,35 @@ import pytz
 import uuid
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v23.4", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v23.5", page_icon="🛵", layout="centered")
 
-# --- CSS 魔法：將清單顏色調整為與系統輸入框一致 ---
+# --- CSS 魔法：包含強制並列與視覺統一 ---
 st.markdown("""
 <style>
+    /* 強制 columns 在手機上不換行 */
+    [data-testid="column"] {
+        min-width: 0px !important;
+        flex: 1 1 0% !important;
+    }
+    [data-testid="stHorizontalBlock"] {
+        flex-wrap: nowrap !important;
+    }
+
     /* 操作按鈕美化 */
     div.stButton > button:first-child {
         background-color: white !important;
         color: #31333F !important;
         border: 1px solid #f0f2f6 !important;
-        padding: 10px 15px !important;
+        padding: 10px 5px !important;
         width: 100% !important;
         border-radius: 10px !important;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        font-size: 14px !important;
     }
     
-    /* 零件清單卡片：使用與日期輸入框一致的灰色 */
+    /* 零件清單卡片 */
     .service-item-box {
-        background-color: rgba(151, 166, 195, 0.15); /* 模仿 Streamlit 預設輸入框的微透明灰 */
+        background-color: rgba(151, 166, 195, 0.15);
         color: inherit;
         padding: 12px 15px;
         border-radius: 10px;
@@ -108,7 +118,7 @@ def add_item_dialog():
         })
         st.rerun()
 
-# 詳情彈窗
+# 詳情查看
 if st.session_state.edit_idx is not None:
     @st.dialog("📋 紀錄詳情")
     def view_dialog(index):
@@ -148,9 +158,10 @@ with tab2:
     save_trigger = False
     
     if mode == "🛠️ 保養維修":
-        c_btn1, c_btn2 = st.columns(2)
-        if c_btn1.button("➕ 新增項目", use_container_width=True): add_item_dialog()
-        if c_btn2.button("🗑️ 清空清單", use_container_width=True): 
+        # ✨ 強制並列按鈕區 ✨
+        col_btn1, col_btn2 = st.columns(2)
+        if col_btn1.button("➕ 新增項目", use_container_width=True): add_item_dialog()
+        if col_btn2.button("🗑️ 清空清單", use_container_width=True): 
             st.session_state.temp_items = []
             st.rerun()
             
