@@ -1,23 +1,22 @@
 import streamlit as st
 import pandas as pd
 from github import Github
-from datetime import date
+from datetime import datetime, date
 import io
 
-# 1. 基本設定
-st.set_page_config(page_title="MyMoto99 v6 - 管理模式", page_icon="🛵", layout="wide")
+# 1. 初始化與 GitHub 連線 (維持原樣)
+st.set_page_config(page_title="MyMoto99 v7", page_icon="🛵", layout="wide")
 REPO_NAME = "rickyang623/my-moto-app"
 FILE_PATH = "data.csv"
+GAS_PRICES = {"92無鉛": 32.4, "95無鉛": 33.9, "98無鉛": 35.9}
 
-# 2. 登入 GitHub
 try:
     g = Github(st.secrets["GITHUB_TOKEN"])
     repo = g.get_repo(REPO_NAME)
-except Exception as e:
-    st.error(f"GitHub 驗證失敗: {e}")
+except:
+    st.error("GitHub 驗證失敗")
     st.stop()
 
-# 3. 讀取資料函式
 @st.cache_data(ttl=60)
 def load_data():
     file_content = repo.get_contents(FILE_PATH)
@@ -26,50 +25,84 @@ def load_data():
 
 df, file_sha = load_data()
 
+# --- 核心邏輯：處理「編輯模式」的暫存狀態 ---
+if 'editing_index' not in st.session_state:
+    st.session_state.editing_index = None  # None 表示新增模式，數字表示正在修第幾列
+
 # --- 介面開始 ---
-tab1, tab2, tab3 = st.tabs(["📊 儀表板", "⛽ 加油紀錄", "🛠️ 資料管理"])
+tab1, tab2 = st.tabs(["📊 儀表板與管理", "⛽ 加油紀錄(新增/修改)"])
 
 with tab1:
-    st.title("🛵 小迪 數據中心")
-    curr_km = df['里程'].max() if not df.empty else 0
-    st.metric("目前里程", f"{curr_km} km")
-    st.write("---")
-    st.subheader("📜 目前紀錄明細")
+    st.title("🛵 資料庫管理")
+    # 增加一個選擇器來挑選要修改的資料
+    st.subheader("🔍 選擇紀錄進行編修")
+    
+    # 建立一個方便閱讀的清單
+    df_display = df.copy()
+    df_display['選擇'] = df_display.apply(lambda x: f"{x['日期']} | {x['里程']}km | {x['金額']}元", axis=1)
+    
+    selected_record = st.selectbox("請挑選一筆紀錄來修改：", 
+                                   options=range(len(df)), 
+                                   format_func=lambda x: df_display.iloc[x]['選擇'])
+    
+    if st.button("📝 載入這筆資料到加油頁面"):
+        st.session_state.editing_index = selected_record
+        st.success(f"已載入第 {selected_record+1} 筆資料，請切換至『加油紀錄』標籤進行修改。")
+
+    st.divider()
     st.dataframe(df.sort_values("日期", ascending=False), use_container_width=True)
 
 with tab2:
-    st.subheader("⛽ 快速加油紀錄")
-    # (此處保留原本的加油 form 邏輯，為了節省篇幅省略，請維持 v5.0 的內容)
-    st.info("請參考 v5.0 的加油表單邏輯")
+    mode_title = "📝 修改舊紀錄" if st.session_state.editing_index is not None else "⛽ 新增加油紀錄"
+    st.subheader(mode_title)
+    
+    # 如果是修改模式，預填入舊資料
+    if st.session_state.editing_index is not None:
+        old_data = df.iloc[st.session_state.editing_index]
+        default_date = datetime.strptime(old_data['日期'], '%Y-%m-%d').date()
+        default_km = int(old_data['里程'])
+        default_amt = int(old_data['金額'])
+        st.warning(f"目前正在修改原始紀錄中... (索引: {st.session_state.editing_index})")
+    else:
+        default_date = date.today()
+        default_km = int(df['里程'].max()) if not df.empty else 0
+        default_amt = 0
 
-with tab3:
-    st.title("🛠️ 資料管理 (管理員模式)")
-    st.warning("在此處修改後，必須按下下方的「確認同步到 GitHub」才會真正儲存。")
-    
-    # 核心功能：使用 data_editor 讓表格可編輯
-    edited_df = st.data_editor(
-        df, 
-        num_rows="dynamic", # 允許刪除或新增列
-        use_container_width=True,
-        key="data_editor_key"
-    )
-    
-    # 比較資料是否有變動
-    if st.button("💾 確認同步修改到 GitHub"):
-        try:
-            # 將編輯後的內容轉回 CSV 字串
-            new_csv_content = edited_df.to_csv(index=False)
+    with st.form("fuel_form"):
+        f_date = st.date_input("日期", default_date)
+        f_type = st.selectbox("種類", list(GAS_PRICES.keys()))
+        f_amt = st.number_input("金額 ($)", min_value=0, value=default_amt)
+        f_km = st.number_input("里程 (km)", min_value=0, value=default_km)
+        
+        # 自動換算依然存在！
+        calc_L = round(f_amt / GAS_PRICES[f_type], 2) if f_amt > 0 else 0.0
+        st.info(f"💡 自動換算公升數: **{calc_L} L**")
+        
+        btn_label = "💾 確認更新舊紀錄" if st.session_state.editing_index is not None else "🚀 確認儲存新紀錄"
+        if st.form_submit_button(btn_label):
+            new_row_data = {
+                "日期": str(f_date),
+                "類別": "加油",
+                "里程": f_km,
+                "金額": f_amt,
+                "細目": f"{f_type} / {calc_L}L"
+            }
             
-            # 推送到 GitHub (需要最新的 SHA 以避免衝突)
-            # 這裡我們重新抓一次內容確保 SHA 是最新的
-            current_file = repo.get_contents(FILE_PATH)
-            repo.update_file(FILE_PATH, "Web介面手動編修資料", new_csv_content, current_file.sha)
+            if st.session_state.editing_index is not None:
+                # 修改模式：替換掉那一列
+                df.iloc[st.session_state.editing_index] = new_row_data
+                st.session_state.editing_index = None # 修正完回到新增模式
+            else:
+                # 新增模式：附加在最後
+                df = pd.concat([df, pd.DataFrame([new_row_data])], ignore_index=True)
             
-            st.success("✅ GitHub 資料庫已更新！網頁將重新載入...")
+            # 推送到 GitHub
+            repo.update_file(FILE_PATH, "App 表單更新/修改資料", df.to_csv(index=False), repo.get_contents(FILE_PATH).sha)
+            st.success("✅ 雲端同步成功！")
             st.cache_data.clear()
             st.rerun()
-        except Exception as e:
-            st.error(f"同步失敗：{e}")
 
-    st.write("---")
-    st.caption("註：點擊表格格子即可修改，選中行後按 Delete 鍵可刪除。")
+    if st.session_state.editing_index is not None:
+        if st.button("❌ 放棄修改，回到新增模式"):
+            st.session_state.editing_index = None
+            st.rerun()
