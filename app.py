@@ -111,18 +111,33 @@ with tab2:
         a_date = st.date_input("加油日期", date.today())
         a_type = st.selectbox("加油種類", list(GAS_PRICES.keys()))
         a_amt = st.number_input("加油金額 ($)", min_value=0, step=10)
-        # 里程自動帶入當前最大值，方便快速微調
-        a_km = st.number_input("當前里程 (km)", min_value=int(latest_km), value=int(latest_km))
+        # 讓預設值等於目前里程，減少輸入負擔
+        a_km = st.number_input("當前里程 (km)", min_value=0, value=int(latest_km))
         
-        a_calc_L = round(a_amt / GAS_PRICES[a_type], 2) if a_amt > 0 else 0.0
+        a_calc_L = round(a_amt / GAS_PRICES[f_type if 'f_type' in locals() else a_type], 2) if a_amt > 0 else 0.0
         st.info(f"💡 自動換算公升數: **{a_calc_L} L**")
         
         if st.form_submit_button("🚀 儲存紀錄", use_container_width=True):
-            new_data = pd.DataFrame([{
-                "日期": str(a_date), "類別": "加油", "里程": a_km, "金額": a_amt, "細目": f"{a_type}/{a_calc_L}L"
-            }])
-            new_df = pd.concat([df, new_data], ignore_index=True)
-            repo.update_file(FILE_PATH, f"Add log: {a_km}km", new_df.to_csv(index=False), file_sha)
-            st.success("儲存成功")
-            st.cache_data.clear()
-            st.rerun()
+            # --- 核心檢核邏輯 ---
+            if a_km <= latest_km:
+                st.error(f"❌ 錯誤：輸入里程 ({a_km} km) 不可小於或等於目前總里程 ({latest_km} km)！")
+                st.toast("儲存失敗，請檢查里程數", icon="🚫")
+            elif a_amt <= 0:
+                st.error("❌ 錯誤：加油金額必須大於 0 元！")
+            else:
+                # 檢核通過，執行儲存
+                new_data = pd.DataFrame([{
+                    "日期": str(a_date), 
+                    "類別": "加油", 
+                    "里程": a_km, 
+                    "金額": a_amt, 
+                    "細目": f"{a_type}/{a_calc_L}L"
+                }])
+                new_df = pd.concat([df, new_data], ignore_index=True)
+                
+                with st.spinner("同步至 GitHub 中..."):
+                    repo.update_file(FILE_PATH, f"Add log: {a_km}km", new_df.to_csv(index=False), file_sha)
+                
+                st.success(f"🎉 儲存成功！目前總里程更新為 {a_km} km")
+                st.cache_data.clear()
+                st.rerun()
