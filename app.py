@@ -3,9 +3,10 @@ import pandas as pd
 from github import Github
 from datetime import datetime, date
 import io
+import re
 
-# 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v10", page_icon="🛵", layout="centered") # 改為 centered 更適合手機比例
+# 1. 頁面配置 (RWD 原則)
+st.set_page_config(page_title="MyMoto99 v11", page_icon="🛵", layout="centered")
 
 REPO_NAME = "rickyang623/my-moto-app"
 FILE_PATH = "data.csv"
@@ -27,7 +28,7 @@ def load_data():
 
 df, file_sha = load_data()
 
-# 3. 彈窗編輯函式 (優化手機表單)
+# 3. 彈窗編輯函式
 @st.dialog("📝 編輯紀錄")
 def edit_dialog(index, row_data):
     try:
@@ -36,7 +37,6 @@ def edit_dialog(index, row_data):
         d_date = date.today()
         
     with st.form("edit_form"):
-        # 手機版建議將欄位拉直
         f_date = st.date_input("加油日期", d_date)
         f_type = st.selectbox("加油種類", list(GAS_PRICES.keys()))
         f_amt = st.number_input("加油金額 ($)", min_value=0, value=int(row_data['金額']))
@@ -54,25 +54,45 @@ def edit_dialog(index, row_data):
             st.cache_data.clear()
             st.rerun()
 
-# 4. 介面佈局
-tab1, tab2 = st.tabs(["📊 紀錄表", "⛽ 新增加油"])
+# --- 介面佈局 ---
+# 1.「紀錄表」改為「首頁」
+tab1, tab2 = st.tabs(["🏠 首頁", "⛽ 新增加油"])
 
 with tab1:
-    st.title("🛵 小迪 數據中心")
-    curr_km = df['里程'].max() if not df.empty else 0
-    st.markdown(f"目前總里程  \n## **{curr_km} km**") # 增加字體醒目度
+    # 2. 移除數據中心，3. 小迪字體縮小
+    st.write("🛵 <span style='font-size: 18px;'>小迪</span>", unsafe_allow_html=True)
+    
+    # 4. 計算里程與油耗
+    if not df.empty and len(df) >= 2:
+        sorted_df = df.sort_values("里程", ascending=False).reset_index(drop=True)
+        latest_km = sorted_df.iloc[0]['里程']
+        prev_km = sorted_df.iloc[1]['里程']
+        
+        # 從細目中提取上次加油的公升數 (正則表達式)
+        prev_detail = sorted_df.iloc[1]['細目']
+        try:
+            prev_liters = float(re.findall(r"(\d+\.\d+)L", prev_detail)[0])
+            avg_efficiency = round((latest_km - prev_km) / prev_liters, 2)
+        except:
+            avg_efficiency = 0.0
+    else:
+        latest_km = df['里程'].max() if not df.empty else 0
+        avg_efficiency = 0.0
+
+    # 儀表板顯示
+    m_col1, m_col2 = st.columns(2)
+    m_col1.metric("目前總里程", f"{latest_km} km")
+    m_col2.metric("平均油耗", f"{avg_efficiency} km/L")
     
     st.divider()
     
-    # 標題改為「紀錄」
+    # 紀錄清單
     st.subheader("📋 紀錄")
     search_query = st.text_input("🔍 搜尋：", placeholder="日期、里程...")
     
     filtered_df = df[df.astype(str).apply(lambda x: x.str.contains(search_query, case=False)).any(axis=1)] if search_query else df
 
-    # RWD 卡片清單
     for index, row in filtered_df.sort_values("日期", ascending=False).iterrows():
-        # 使用 Streamlit container 做成卡片感
         with st.container(border=True):
             col_top1, col_top2 = st.columns([1, 1])
             col_top1.write(f"📅 **{row['日期']}**")
@@ -82,7 +102,6 @@ with tab1:
             col_mid1.write(f"📍 `{row['里程']} km`")
             col_mid2.write(f"⛽ {row['細目']}")
             
-            # 全寬度編輯按鈕，方便手機點擊
             if st.button("編輯紀錄", key=f"btn_{index}", use_container_width=True):
                 edit_dialog(index, row)
 
@@ -92,7 +111,8 @@ with tab2:
         a_date = st.date_input("加油日期", date.today())
         a_type = st.selectbox("加油種類", list(GAS_PRICES.keys()))
         a_amt = st.number_input("加油金額 ($)", min_value=0, step=10)
-        a_km = st.number_input("當前里程 (km)", min_value=int(curr_km))
+        # 里程自動帶入當前最大值，方便快速微調
+        a_km = st.number_input("當前里程 (km)", min_value=int(latest_km), value=int(latest_km))
         
         a_calc_L = round(a_amt / GAS_PRICES[a_type], 2) if a_amt > 0 else 0.0
         st.info(f"💡 自動換算公升數: **{a_calc_L} L**")
@@ -102,7 +122,7 @@ with tab2:
                 "日期": str(a_date), "類別": "加油", "里程": a_km, "金額": a_amt, "細目": f"{a_type}/{a_calc_L}L"
             }])
             new_df = pd.concat([df, new_data], ignore_index=True)
-            repo.update_file(FILE_PATH, "Add log", new_df.to_csv(index=False), file_sha)
+            repo.update_file(FILE_PATH, f"Add log: {a_km}km", new_df.to_csv(index=False), file_sha)
             st.success("儲存成功")
             st.cache_data.clear()
             st.rerun()
