@@ -8,7 +8,7 @@ import pytz
 import base64
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v21.1", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v21.2", page_icon="🛵", layout="centered")
 
 # --- CSS 魔法 ---
 st.markdown("""
@@ -47,8 +47,9 @@ except:
 def load_data():
     file_content = repo.get_contents(FILE_PATH)
     data = pd.read_csv(io.StringIO(file_content.decoded_content.decode('utf-8')))
-    for col in ['漏記', '備註', '照片', '店家']:
-        if col not in data.columns: data[col] = ''
+    # 強制檢查所有必要欄位
+    for col in ['漏記', '備註', '照片', '店家', '類別']:
+        if col not in data.columns: data[col] = 'No' if col == '漏記' else ''
     data['日期'] = pd.to_datetime(data['日期'])
     data = data.sort_values("日期", ascending=False).reset_index(drop=True)
     return data, file_content.sha
@@ -60,25 +61,27 @@ if 'edit_idx' not in st.session_state: st.session_state.edit_idx = None
 def img_to_b64(file):
     return base64.b64encode(file.getvalue()).decode() if file else ""
 
-# 3. 詳情查看彈窗 (加入圖片容錯)
+# 3. 詳情查看彈窗
 @st.dialog("📝 紀錄詳情")
 def view_dialog(index):
     row = df.iloc[index]
     st.write(f"📅 **日期：** {row['日期'].strftime('%Y-%m-%d %H:%M')}")
     st.write(f"🏷️ **類別：** {row['類別']} | 📍 {row['里程']} km")
-    if row['店家']: st.write(f"🏠 **店家：** {row['店家']}")
-    st.success(f"💰 **總計金額：** ${int(row['金額'])}")
+    # 加油紀錄不顯示店家
+    if row['類別'] == '保養' and row['店家']: 
+        st.write(f"🏠 **店家：** {row['店家']}")
+    
+    st.success(f"💰 **金額：** ${int(row['金額'])}")
     st.divider()
-    st.write("**項目明細：**")
+    st.write("**明細：**")
     st.info(row['細目'])
     if row['備註']: st.write(f"💬 備註：{row['備註']}")
     
-    # 🖼️ 圖片顯示容錯處理
     if row['照片'] and str(row['照片']).strip() != "":
         try:
             st.image(base64.b64decode(row['照片']), use_container_width=True)
-        except Exception as e:
-            st.warning("⚠️ 圖片損壞或格式不支援，無法顯示")
+        except:
+            st.warning("⚠️ 圖片損壞，無法顯示")
     
     if st.button("🗑️ 刪除紀錄", use_container_width=True, type="secondary"):
         new_df = df.drop(index).reset_index(drop=True)
@@ -96,21 +99,22 @@ tab1, tab2 = st.tabs(["🏠 首頁", "➕ 新增紀錄"])
 with tab1:
     st.write("🛵 <span style='font-size: 13px; color: gray;'>小迪</span>", unsafe_allow_html=True)
     
-    # ⛽ 油耗計算核心邏輯優化
+    # ⛽ 油耗計算核心邏輯 (精準過濾版)
     avg_eff = "--"
-    # 只取出「加油」類別進行計算
-    gas_only_df = df[df['類別'] == '加油'].reset_index(drop=True)
+    gas_only = df[df['類別'] == '加油'].copy().reset_index(drop=True)
     
-    if len(gas_only_df) >= 2:
-        # 檢查最新的加油紀錄是否有標記「漏記」
-        if gas_only_df.iloc[0]['漏記'] == 'No':
+    if len(gas_only) >= 2:
+        # 只在最新一筆加油「沒有」勾選漏記時才計算
+        if gas_only.iloc[0]['漏記'] != 'Yes':
             try:
-                # 抓取最近兩次加油的里程與上一次的公升數
-                curr_km = gas_only_df.iloc[0]['里程']
-                prev_km = gas_only_df.iloc[1]['里程']
-                # 解析上一次加油的公升數
-                prev_liters = float(re.findall(r"(\d+\.\d+)L", gas_only_df.iloc[1]['細目'])[0])
-                avg_eff = f"{round((curr_km - prev_km) / prev_liters, 1)}"
+                curr_km = float(gas_only.iloc[0]['里程'])
+                prev_km = float(gas_only.iloc[1]['里程'])
+                # 使用正則表達式從細目中抓取 L 前面的數字
+                match = re.search(r"(\d+\.?\d*)L", gas_only.iloc[1]['細目'])
+                if match:
+                    prev_liters = float(match.group(1))
+                    if prev_liters > 0:
+                        avg_eff = f"{round((curr_km - prev_km) / prev_liters, 1)}"
             except:
                 avg_eff = "--"
 
@@ -140,7 +144,8 @@ with tab1:
         dt = row['日期'].strftime('%m/%d %H:%M')
         km = f"{row['里程']}k"
         amt = f"${int(row['金額'])}"
-        if st.button(f"{icon} {dt} | {km} | {amt}", key=f"rec_{index}", use_container_width=True):
+        miss_tag = "⚠️" if row['漏記'] == 'Yes' else ""
+        if st.button(f"{icon} {dt} | {km} | {amt} {miss_tag}", key=f"rec_{index}", use_container_width=True):
             st.session_state.edit_idx = index
             st.rerun()
 
@@ -154,20 +159,27 @@ with tab2:
         a_date = c1.date_input("日期", now.date())
         a_time = c2.time_input("時間", now.time())
         a_km = st.number_input("目前里程 (km)", min_value=0, value=int(latest_km))
-        a_shop = st.text_input("施工店家 (選填)")
+        
+        # 施工店家：僅在保養模式顯示
+        a_shop = ""
+        if mode == "🛠️ 保養維修":
+            a_shop = st.text_input("施工店家 (選填)")
+            
         a_photo = st.file_uploader("新增照片", type=['png', 'jpg', 'jpeg'])
         a_note = st.text_area("備註 (選填)")
 
         if mode == "⛽ 加油":
             a_type = st.selectbox("油種", list(GAS_PRICES.keys()))
             a_amt = st.number_input("加油金額 ($)", min_value=0, step=10)
-            a_miss = st.checkbox("本次紀錄前有漏掉次數")
+            # 找回消失的漏記標記
+            a_miss = st.checkbox("本次紀錄前有漏掉次數 (本次油耗不計)")
+            
             calc_L = round(a_amt / GAS_PRICES[a_type], 2) if a_amt > 0 else 0.0
             st.info(f"💡 自動換算：{calc_L} L")
             
             if st.form_submit_button("🚀 儲存加油", use_container_width=True):
                 full_dt = datetime.combine(a_date, a_time).strftime('%Y-%m-%d %H:%M')
-                new_row = {"日期": full_dt, "類別": "加油", "里程": a_km, "金額": a_amt, "細目": f"{a_type}/{calc_L}L", "漏記": "Yes" if a_miss else "No", "備註": a_note, "照片": img_to_b64(a_photo), "店家": a_shop}
+                new_row = {"日期": full_dt, "類別": "加油", "里程": a_km, "金額": a_amt, "細目": f"{a_type}/{calc_L}L", "漏記": "Yes" if a_miss else "No", "備註": a_note, "照片": img_to_b64(a_photo), "店家": ""}
                 new_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 new_df['日期'] = pd.to_datetime(new_df['日期'])
                 repo.update_file(FILE_PATH, "Gas", new_df.sort_values("日期", ascending=False).to_csv(index=False), repo.get_contents(FILE_PATH).sha)
