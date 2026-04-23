@@ -1,3 +1,28 @@
+import pytz # 引入時區套件
+
+# ... 前面代碼維持原樣 ...
+
+with tab2:
+    st.subheader("⛽ 加油紀錄")
+    
+    # 修正時區邏輯：強制抓取台北時間
+    tz = pytz.timezone('Asia/Taipei')
+    now = datetime.now(tz) # 這裡會精準抓到 13:18
+    
+    with st.form("add_form", clear_on_submit=True):
+        col_d, col_t = st.columns(2)
+        a_date = col_d.date_input("日期", now.date())
+        a_time = col_t.time_input("時間", now.time())
+        
+        # ... 後續表單內容 ...
+        
+        if st.form_submit_button("🚀 儲存紀錄", use_container_width=True):
+            # 儲存時也要確保是結合後的台北時間
+            local_dt = datetime.combine(a_date, a_time)
+            full_dt_str = local_dt.strftime('%Y-%m-%d %H:%M')
+            
+            # ... 存檔邏輯 ...
+
 import streamlit as st
 import pandas as pd
 from github import Github
