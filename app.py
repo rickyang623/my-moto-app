@@ -7,37 +7,30 @@ import re
 import pytz
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v16", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v17", page_icon="🛵", layout="centered")
 
-# --- 終極 CSS：強制單列不換行 ---
+# --- CSS 魔法：美化全寬度按鈕紀錄列 ---
 st.markdown("""
 <style>
-    /* 強制 columns 不換行 */
-    [data-testid="column"] {
-        flex-direction: row !important;
-        align-items: center !important;
+    /* 讓按鈕看起來像清單列而非傳統按鈕 */
+    div.stButton > button:first-child {
+        background-color: white !important;
+        color: #31333F !important;
+        border: 1px solid #f0f2f6 !important;
+        padding: 10px 15px !important;
+        text-align: left !important;
+        display: block !important;
+        width: 100% !important;
+        margin-bottom: -10px !important;
+        transition: 0.2s;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
     }
-    /* 縮小按鈕尺寸 */
-    .stButton>button {
-        padding: 2px 5px !important;
-        height: 28px !important;
-        min-width: 40px !important;
-        font-size: 12px !important;
-        margin-top: 5px !important;
+    div.stButton > button:hover {
+        border-color: #ff4b4b !important;
+        background-color: #fffafb !important;
     }
-    /* 讓文字資訊排版緊湊 */
-    .info-box {
-        line-height: 1.2;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .tag {
-        font-size: 11px;
-        padding: 0px 4px;
-        border-radius: 3px;
-        margin-right: 2px;
-    }
+    .tag-km { color: #28a745; font-weight: bold; }
+    .tag-amt { color: #007bff; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -65,10 +58,11 @@ def load_data():
 
 df, file_sha = load_data()
 
-if 'edit_index' not in st.session_state:
-    st.session_state.edit_index = None
+# 初始化編輯狀態
+if 'edit_idx' not in st.session_state:
+    st.session_state.edit_idx = None
 
-# 3. 彈窗編輯
+# 3. 彈窗編輯函式
 @st.dialog("📝 編輯紀錄")
 def edit_dialog(index):
     row_data = df.iloc[index]
@@ -93,10 +87,10 @@ def edit_dialog(index):
             final_df['日期'] = final_df['日期'].dt.strftime('%Y-%m-%d %H:%M')
             repo.update_file(FILE_PATH, "Edit", final_df.to_csv(index=False), repo.get_contents(FILE_PATH).sha)
             st.cache_data.clear()
-            st.session_state.edit_index = None
+            st.session_state.edit_idx = None
             st.rerun()
         if col_c.form_submit_button("❌ 取消", use_container_width=True):
-            st.session_state.edit_index = None
+            st.session_state.edit_idx = None
             st.rerun()
 
     st.write("---")
@@ -105,11 +99,12 @@ def edit_dialog(index):
         new_df['日期'] = new_df['日期'].dt.strftime('%Y-%m-%d %H:%M')
         repo.update_file(FILE_PATH, "Delete", new_df.to_csv(index=False), repo.get_contents(FILE_PATH).sha)
         st.cache_data.clear()
-        st.session_state.edit_index = None
+        st.session_state.edit_idx = None
         st.rerun()
 
-if st.session_state.edit_index is not None:
-    edit_dialog(st.session_state.edit_index)
+# 檢查是否開啟編輯窗
+if st.session_state.edit_idx is not None:
+    edit_dialog(st.session_state.edit_idx)
 
 # --- 介面佈局 ---
 tab1, tab2 = st.tabs(["🏠 首頁", "⛽ 新增加油"])
@@ -117,7 +112,7 @@ tab1, tab2 = st.tabs(["🏠 首頁", "⛽ 新增加油"])
 with tab1:
     st.write("🛵 <span style='font-size: 14px; color: gray;'>小迪</span>", unsafe_allow_html=True)
     
-    # 儀表板數據
+    # 儀表數據計算
     avg_eff = "--"
     latest_km = df['里程'].max() if not df.empty else 0
     if len(df) >= 2 and df.iloc[0]['漏記'] == 'No':
@@ -131,34 +126,29 @@ with tab1:
     m_col2.metric("平均油耗", avg_eff)
     
     st.divider()
+    st.subheader("📋 紀錄")
     
-    # --- 列表區域 ---
     items_per_page = 8
     total_pages = max((len(df) // items_per_page) + (1 if len(df) % items_per_page > 0 else 0), 1)
     page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1) if total_pages > 1 else 1
     
     start_idx = (page - 1) * items_per_page
+    
+    # 渲染紀錄清單
     for index, row in df.iloc[start_idx : start_idx + items_per_page].iterrows():
-        c_info, c_btn = st.columns([85, 15]) # 使用極端比例
+        dt = row['日期'].strftime('%m/%d %H:%M')
+        miss = "⚠️" if row['漏記'] == 'Yes' else ""
+        km = f"{row['里程']}k"
+        amt = f"${row['金額']}"
+        oil = row['細目'].split('/')[0]
         
-        with c_info:
-            dt = row['日期'].strftime('%m/%d %H:%M')
-            miss = "⚠️" if row['漏記'] == 'Yes' else ""
-            st.markdown(f"""
-            <div class="info-box">
-                <b>{dt}</b>{miss} | 
-                <span class="tag" style="color:green;background:#e6ffe6;">{row['里程']}k</span>
-                <span class="tag" style="color:blue;background:#e6f3ff;">${row['金額']}</span>
-                <span style="color:gray;font-size:12px;">{row['細目'].split('/')[0]}</span>
-            </div>
-            """, unsafe_allow_html=True)
+        # 關鍵：將內容組合成一個單一的字串作為按鈕 Label
+        btn_label = f"{dt}{miss} | {km} | {amt} | {oil}"
         
-        with c_btn:
-            if st.button("改", key=f"btn_{index}"):
-                st.session_state.edit_index = index
-                st.rerun()
-        
-        st.markdown('<hr style="margin:5px 0; opacity:0.1;">', unsafe_allow_html=True)
+        # 每個紀錄都是一個佔滿寬度的按鈕
+        if st.button(btn_label, key=f"rec_{index}", use_container_width=True):
+            st.session_state.edit_idx = index
+            st.rerun()
 
 with tab2:
     st.subheader("⛽ 加油紀錄")
