@@ -8,50 +8,42 @@ import pytz
 import uuid
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v23.5", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v23.6", page_icon="🛵", layout="centered")
 
-# --- CSS 魔法：包含強制並列與視覺統一 ---
+# --- CSS 魔法：專為手機操作優化 ---
 st.markdown("""
 <style>
-    /* 強制 columns 在手機上不換行 */
-    [data-testid="column"] {
-        min-width: 0px !important;
-        flex: 1 1 0% !important;
-    }
-    [data-testid="stHorizontalBlock"] {
-        flex-wrap: nowrap !important;
-    }
-
-    /* 操作按鈕美化 */
+    /* 1. 操作按鈕：全寬度、大字體、方便點擊 */
     div.stButton > button:first-child {
         background-color: white !important;
         color: #31333F !important;
-        border: 1px solid #f0f2f6 !important;
-        padding: 10px 5px !important;
+        border: 1px solid #e0e0e0 !important;
+        padding: 12px 15px !important;
         width: 100% !important;
-        border-radius: 10px !important;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        font-size: 14px !important;
+        border-radius: 12px !important;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.05) !important;
+        margin-bottom: 5px !important;
+        font-size: 16px !important;
+        font-weight: 500 !important;
     }
     
-    /* 零件清單卡片 */
+    /* 2. 零件清單卡片：手機版緊湊型 */
     .service-item-box {
-        background-color: rgba(151, 166, 195, 0.15);
+        background-color: rgba(151, 166, 195, 0.12);
         color: inherit;
-        padding: 12px 15px;
+        padding: 10px 15px;
         border-radius: 10px;
-        margin-bottom: 8px;
-        border: 1px solid rgba(151, 166, 195, 0.2);
+        margin-bottom: 6px;
         border-left: 5px solid #ff4b4b; 
         display: flex;
         justify-content: space-between;
         align-items: center;
     }
-    .item-main { font-size: 16px; font-weight: bold; }
+    .item-main { font-size: 15px; font-weight: bold; }
     .item-sub { font-size: 12px; opacity: 0.7; }
-    .item-price { font-size: 16px; font-weight: bold; }
+    .item-price { font-size: 16px; font-weight: 800; }
     
-    /* 隱藏焦點轉移器 */
+    /* 3. 隱藏焦點轉移器 */
     .stTextInput { height: 0px !important; padding: 0px !important; margin: 0px !important; opacity: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -111,14 +103,14 @@ def add_item_dialog():
     p_km = c3.number_input("里程週期 (km)", value=SERVICE_TEMPLATES[item_type]['km'])
     p_month = c4.number_input("時間週期 (月)", value=SERVICE_TEMPLATES[item_type]['month'])
     
-    if st.button("確認加入", use_container_width=True):
+    if st.button("確認加入紀錄", use_container_width=True):
         st.session_state.temp_items.append({
             "item_name": item_type, "price": u_price, "qty": u_qty,
             "total": u_price * u_qty, "km_period": p_km, "month_period": p_month
         })
         st.rerun()
 
-# 詳情查看
+# 4. 詳情查看
 if st.session_state.edit_idx is not None:
     @st.dialog("📋 紀錄詳情")
     def view_dialog(index):
@@ -132,7 +124,7 @@ if st.session_state.edit_idx is not None:
                 st.markdown(f"**{item['item_name']}** : ${item['total']} ({item['qty']}x{item['price']})")
         else: st.info(str(row['細目']))
         
-        if st.button("🗑️ 刪除紀錄", type="secondary", use_container_width=True):
+        if st.button("🗑️ 刪除這筆紀錄", type="secondary", use_container_width=True):
             new_m = master_df.drop(index).reset_index(drop=True)
             new_m['日期'] = new_m['日期'].dt.strftime('%Y-%m-%d %H:%M')
             repo.update_file("data.csv", "Delete", new_m.to_csv(index=False), master_sha)
@@ -158,13 +150,10 @@ with tab2:
     save_trigger = False
     
     if mode == "🛠️ 保養維修":
-        # ✨ 強制並列按鈕區 ✨
-        col_btn1, col_btn2 = st.columns(2)
-        if col_btn1.button("➕ 新增項目", use_container_width=True): add_item_dialog()
-        if col_btn2.button("🗑️ 清空清單", use_container_width=True): 
-            st.session_state.temp_items = []
-            st.rerun()
-            
+        # ✨ 操作按鈕：改為上下排列，全寬度最穩定 ✨
+        if st.button("➕ 新增保養/維修項目", use_container_width=True): 
+            add_item_dialog()
+        
         total_sum = 0
         if st.session_state.temp_items:
             st.write("📦 **零件清單**")
@@ -179,7 +168,12 @@ with tab2:
                 </div>
                 """, unsafe_allow_html=True)
                 total_sum += item['total']
+            
             st.markdown(f"#### 總計金額：<span style='color:#FF4B4B'>${total_sum}</span>", unsafe_allow_html=True)
+            
+            if st.button("🗑️ 清空清單", use_container_width=True, type="secondary"): 
+                st.session_state.temp_items = []
+                st.rerun()
             st.divider()
 
     with st.form("main_form", clear_on_submit=True):
@@ -207,7 +201,7 @@ with tab2:
 
     if save_trigger:
         if not st.session_state.temp_items:
-            st.error("清單是空的")
+            st.error("清單是空的，請先新增零件")
         else:
             rec_id = str(uuid.uuid4())
             full_dt = datetime.combine(a_date, a_time).strftime('%Y-%m-%d %H:%M')
@@ -221,8 +215,9 @@ with tab2:
                 new_details.append(item)
             new_detail_df = pd.concat([detail_df, pd.DataFrame(new_details)], ignore_index=True)
             
-            repo.update_file("data.csv", "Add M", new_master.to_csv(index=False), master_sha)
-            repo.update_file("service_details.csv", "Add D", new_detail_df.to_csv(index=False), repo.get_contents("service_details.csv").sha)
+            repo.update_file("data.csv", "Add Master", new_master.to_csv(index=False), master_sha)
+            repo.update_file("service_details.csv", "Add Details", new_detail_df.to_csv(index=False), repo.get_contents("service_details.csv").sha)
             st.session_state.temp_items = []
             st.cache_data.clear()
+            st.success("紀錄已存檔！")
             st.rerun()
