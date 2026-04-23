@@ -8,9 +8,9 @@ import pytz
 import uuid
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v23.3", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v23.4", page_icon="🛵", layout="centered")
 
-# --- CSS 魔法：換成中性深灰色調 ---
+# --- CSS 魔法：將清單顏色調整為與系統輸入框一致 ---
 st.markdown("""
 <style>
     /* 操作按鈕美化 */
@@ -24,23 +24,25 @@ st.markdown("""
         box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
     }
     
-    /* 零件清單卡片：改用磨砂深灰 */
+    /* 零件清單卡片：使用與日期輸入框一致的灰色 */
     .service-item-box {
-        background-color: #3d3d3d; /* 中性深灰，手機上更有質感 */
-        color: #FFFFFF;
+        background-color: rgba(151, 166, 195, 0.15); /* 模仿 Streamlit 預設輸入框的微透明灰 */
+        color: inherit;
         padding: 12px 15px;
-        border-radius: 12px;
+        border-radius: 10px;
         margin-bottom: 8px;
-        border: 1px solid #4d4d4d;
+        border: 1px solid rgba(151, 166, 195, 0.2);
         border-left: 5px solid #ff4b4b; 
         display: flex;
         justify-content: space-between;
         align-items: center;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    .item-main { font-size: 16px; font-weight: bold; color: #70ffdf; } /* 亮青色 */
-    .item-sub { font-size: 12px; color: #cccccc; }
-    .item-price { font-size: 16px; font-weight: bold; color: #FFFFFF; }
+    .item-main { font-size: 16px; font-weight: bold; }
+    .item-sub { font-size: 12px; opacity: 0.7; }
+    .item-price { font-size: 16px; font-weight: bold; }
+    
+    /* 隱藏焦點轉移器 */
+    .stTextInput { height: 0px !important; padding: 0px !important; margin: 0px !important; opacity: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -84,7 +86,6 @@ def load_data():
 
 master_df, detail_df, master_sha = load_data()
 
-# 初始化狀態
 if 'temp_items' not in st.session_state: st.session_state.temp_items = []
 if 'edit_idx' not in st.session_state: st.session_state.edit_idx = None
 
@@ -119,12 +120,12 @@ if st.session_state.edit_idx is not None:
         if not items.empty:
             for _, item in items.iterrows():
                 st.markdown(f"**{item['item_name']}** : ${item['total']} ({item['qty']}x{item['price']})")
-        else: st.info(row['細目'])
+        else: st.info(str(row['細目']))
         
-        if st.button("🗑️ 刪除", type="secondary", use_container_width=True):
+        if st.button("🗑️ 刪除紀錄", type="secondary", use_container_width=True):
             new_m = master_df.drop(index).reset_index(drop=True)
             new_m['日期'] = new_m['日期'].dt.strftime('%Y-%m-%d %H:%M')
-            repo.update_file("data.csv", "Del", new_m.to_csv(index=False), master_sha)
+            repo.update_file("data.csv", "Delete", new_m.to_csv(index=False), master_sha)
             st.cache_data.clear()
             st.session_state.edit_idx = None
             st.rerun()
@@ -135,10 +136,10 @@ tab1, tab2 = st.tabs(["🏠 首頁", "➕ 新增紀錄"])
 
 with tab1:
     latest_km = master_df['里程'].max() if not master_df.empty else 0
-    st.write(f"🛵 里程：**{latest_km} km**")
+    st.write(f"🛵 目前里程：**{latest_km} km**")
     for index, row in master_df.head(10).iterrows():
         icon = "⛽" if row['類別'] == '加油' else "🛠️"
-        if st.button(f"{icon} {row['日期'].strftime('%m/%d %H:%M')} | ${int(row['金額'])}", key=f"rec_{index}", use_container_width=True):
+        if st.button(f"{icon} {row['日期'].strftime('%m/%d %H:%M')} | ${int(row['金額'])}", key=f"r_{index}", use_container_width=True):
             st.session_state.edit_idx = index
             st.rerun()
 
