@@ -69,12 +69,9 @@ def get_atomic_data(file_name: str):
         "Cache-Control": "no-cache",
         "Pragma":        "no-cache",
     }
-    # ✅ 加上時間戳記作為 query string，確保每次都是全新請求
-    params = {"_": int(time.time() * 1000)}
-    
     try:
-params = {"_": int(time.time() * 1000)}
-resp   = requests.get(url, headers=headers, params=params, timeout=10)
+        params = {"_": int(time.time() * 1000)}
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         data    = resp.json()
         content = base64.b64decode(data["content"]).decode("utf-8")
