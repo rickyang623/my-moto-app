@@ -126,3 +126,21 @@ with tab2:
         if st.button("❌ 放棄修改，回到新增模式"):
             st.session_state.editing_index = None
             st.rerun()
+
+# --- 前面的 GitHub 登入與資料讀取 load_data() 保持不變 ---
+
+# 1. 【關鍵步驟】先定義標籤變數
+tab1, tab2 = st.tabs(["📊 儀表板與管理", "⛽ 加油紀錄(新增/修改)"])
+
+# 2. 接著才開始使用這些變數
+with tab1:
+    st.title("🛵 資料庫管理")
+    
+    # --- 這裡放入我上一則訊息給你的搜尋過濾與清單程式碼 ---
+    search_query = st.text_input("🔍 搜尋紀錄：", placeholder="輸入關鍵字...")
+    
+    # ... (中間的過濾邏輯與 for 迴圈列表) ...
+
+with tab2:
+    # --- 這裡放入原本的加油表單邏輯 ---
+    st.subheader("⛽ 加油紀錄表單")
