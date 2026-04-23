@@ -7,31 +7,31 @@ import re
 import pytz
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v18.3", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v18.4", page_icon="🛵", layout="centered")
 
-# --- 終極 CSS 魔法：美化清單、表單、與隱藏元件 ---
+# --- 終極 CSS 魔法：權重平衡優化 ---
 st.markdown("""
 <style>
-    /* 1. 讓紀錄列看起來像 App 的卡片清單，整列可點擊 */
+    /* 1. 全寬度按鈕紀錄列美化 */
     div.stButton > button:first-child {
         background-color: white !important;
         color: #31333F !important;
         border: 1px solid #f0f2f6 !important;
-        padding: 12px 15px !important;
+        padding: 10px 12px !important;
         text-align: left !important;
         display: block !important;
         width: 100% !important;
-        margin-bottom: -10px !important;
+        margin-bottom: -12px !important;
         transition: 0.2s;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        border-radius: 10px !important;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+        border-radius: 8px !important;
+        font-size: 14px !important;
     }
     div.stButton > button:hover {
         border-color: #ff4b4b !important;
-        background-color: #fffafb !important;
     }
     
-    /* 2. 隱藏「焦點轉移器」的輸入框，防止彈窗時行事曆自動跳出 */
+    /* 2. 隱藏焦點轉移器 */
     .stTextInput {
         height: 0px !important;
         padding: 0px !important;
@@ -39,9 +39,9 @@ st.markdown("""
         opacity: 0 !important;
     }
     
-    /* 3. 調整分頁滑桿的間距 */
-    .stSelectSlider {
-        padding-top: 20px;
+    /* 3. 調整 Tab 字體大小 */
+    button[data-baseweb="tab"] {
+        font-size: 16px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -56,7 +56,7 @@ try:
     g = Github(st.secrets["GITHUB_TOKEN"])
     repo = g.get_repo(REPO_NAME)
 except:
-    st.error("GitHub 驗證失敗，請檢查 Token 設置")
+    st.error("GitHub 驗證失敗")
     st.stop()
 
 @st.cache_data(ttl=60)
@@ -66,11 +66,11 @@ def load_data():
     if '漏記' not in data.columns: data['漏記'] = 'No'
     data['日期'] = pd.to_datetime(data['日期'])
     data = data.sort_values("日期", ascending=False).reset_index(drop=True)
-    return data, file_content.sha
+    return data, file_sha_val
 
-df, file_sha = load_data()
+df, file_sha_val = load_data()
 
-# 初始化編輯狀態存儲
+# 初始化編輯狀態
 if 'edit_idx' not in st.session_state:
     st.session_state.edit_idx = None
 
@@ -79,9 +79,7 @@ if 'edit_idx' not in st.session_state:
 def edit_dialog(index):
     row_data = df.iloc[index]
     with st.form("edit_form"):
-        # 🛡️ 焦點轉移器：搶走系統對焦，防止日期彈窗自動開啟
         st.text_input("Focus Grabber", label_visibility="collapsed", key="f_grabber")
-        
         f_date = st.date_input("日期", row_data['日期'].date())
         f_time = st.time_input("時間", row_data['日期'].time())
         f_type = st.selectbox("油種", list(GAS_PRICES.keys()))
@@ -109,7 +107,7 @@ def edit_dialog(index):
             st.rerun()
 
     st.write("---")
-    if st.button("🗑️ 刪除這筆紀錄", use_container_width=True, type="secondary"):
+    if st.button("🗑️ 刪除紀錄", use_container_width=True, type="secondary"):
         new_df = df.drop(index).reset_index(drop=True)
         new_df['日期'] = new_df['日期'].dt.strftime('%Y-%m-%d %H:%M')
         repo.update_file(FILE_PATH, "Delete", new_df.to_csv(index=False), repo.get_contents(FILE_PATH).sha)
@@ -117,7 +115,6 @@ def edit_dialog(index):
         st.session_state.edit_idx = None
         st.rerun()
 
-# 偵測是否觸發編輯彈窗
 if st.session_state.edit_idx is not None:
     edit_dialog(st.session_state.edit_idx)
 
@@ -125,9 +122,10 @@ if st.session_state.edit_idx is not None:
 tab1, tab2 = st.tabs(["🏠 首頁", "⛽ 新增加油"])
 
 with tab1:
-    st.write("🛵 <span style='font-size: 14px; color: gray;'>小迪</span>", unsafe_allow_html=True)
+    # 縮小「小迪」顯示
+    st.write("🛵 <span style='font-size: 13px; color: gray;'>小迪</span>", unsafe_allow_html=True)
     
-    # 油耗計算邏輯
+    # 油耗計算
     avg_eff = "--"
     latest_km = df['里程'].max() if not df.empty else 0
     if len(df) >= 2 and df.iloc[0]['漏記'] == 'No':
@@ -136,28 +134,35 @@ with tab1:
             avg_eff = f"{round((df.iloc[0]['里程'] - df.iloc[1]['里程']) / prev_liters, 1)}"
         except: pass
 
-    # --- 🛠️ 儀表板：強制 HTML Flexbox 橫向佈局 ---
+    # --- 儀表板：放大數值，微調字體大小平衡 ---
     dashboard_html = f"""
-    <div style="display: flex; gap: 10px; margin: 10px 0;">
-        <div style="flex: 1; background: white; padding: 12px; border-radius: 10px; border: 1px solid #f0f2f6; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;">
-            <div style="font-size: 12px; color: gray;">目前里程</div>
-            <div style="font-size: 20px; font-weight: bold; color: #31333F;">{latest_km} <span style="font-size: 14px;">km</span></div>
+    <div style="display: flex; gap: 8px; margin: 5px 0 15px 0;">
+        <div style="flex: 1; background: white; padding: 15px 10px; border-radius: 12px; border: 1px solid #f0f2f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); text-align: center;">
+            <div style="font-size: 13px; color: #666; margin-bottom: 4px;">目前里程</div>
+            <div style="font-size: 24px; font-weight: 800; color: #31333F;">{latest_km} <span style="font-size: 14px; font-weight: 400;">km</span></div>
         </div>
-        <div style="flex: 1; background: white; padding: 12px; border-radius: 10px; border: 1px solid #f0f2f6; box-shadow: 0 1px 3px rgba(0,0,0,0.05); text-align: center;">
-            <div style="font-size: 12px; color: gray;">平均油耗</div>
-            <div style="font-size: 20px; font-weight: bold; color: #31333F;">{avg_eff} <span style="font-size: 14px;">km/L</span></div>
+        <div style="flex: 1; background: white; padding: 15px 10px; border-radius: 12px; border: 1px solid #f0f2f6; box-shadow: 0 1px 2px rgba(0,0,0,0.05); text-align: center;">
+            <div style="font-size: 13px; color: #666; margin-bottom: 4px;">平均油耗</div>
+            <div style="font-size: 24px; font-weight: 800; color: #31333F;">{avg_eff} <span style="font-size: 14px; font-weight: 400;">km/L</span></div>
         </div>
     </div>
     """
     st.markdown(dashboard_html, unsafe_allow_html=True)
     
-    st.divider()
-    st.subheader("📋 加油紀錄")
+    # 修改標題樣式，不使用 subheader 避免字體過大
+    st.write("📖 **加油紀錄**", unsafe_allow_html=True)
     
-    # 紀錄分頁顯示
+    # 紀錄分頁
     items_per_page = 8
     total_pages = max((len(df) // items_per_page) + (1 if len(df) % items_per_page > 0 else 0), 1)
-    page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1) if total_pages > 1 else 1
+    
+    # 只有一頁以上才顯示滑桿
+    if total_pages > 1:
+        page = st.select_slider("頁碼", options=range(1, total_pages + 1), value=1)
+    else:
+        page = 1
+    
+    st.write("") # 增加一點點間距
     
     start_idx = (page - 1) * items_per_page
     for index, row in df.iloc[start_idx : start_idx + items_per_page].iterrows():
@@ -167,20 +172,16 @@ with tab1:
         amt = f"${row['金額']}"
         oil = row['細目'].split('/')[0]
         
-        # 建立全寬度按鈕 Label
         btn_label = f"{dt}{miss} | {km} | {amt} | {oil}"
-        
         if st.button(btn_label, key=f"rec_{index}", use_container_width=True):
             st.session_state.edit_idx = index
             st.rerun()
 
 with tab2:
-    st.subheader("⛽ 新增加油")
+    st.write("⛽ **填寫加油資料**")
     now_taipei = datetime.now(TAIPEI_TZ)
     with st.form("add_form", clear_on_submit=True):
-        # 新增頁面也加入焦點轉移，優化體驗
         st.text_input("Focus Grabber", label_visibility="collapsed", key="add_grabber")
-        
         col_d, col_t = st.columns(2)
         a_date = col_d.date_input("日期", now_taipei.date())
         a_time = col_t.time_input("時間", now_taipei.time())
@@ -204,6 +205,6 @@ with tab2:
                 combined_df['日期'] = pd.to_datetime(combined_df['日期'])
                 combined_df = combined_df.sort_values("日期", ascending=False)
                 combined_df['日期'] = combined_df['日期'].dt.strftime('%Y-%m-%d %H:%M')
-                repo.update_file(FILE_PATH, "Add", combined_df.to_csv(index=False), file_sha)
+                repo.update_file(FILE_PATH, "Add", combined_df.to_csv(index=False), file_sha_val)
                 st.cache_data.clear()
                 st.rerun()
