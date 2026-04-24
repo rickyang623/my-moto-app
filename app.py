@@ -8,7 +8,7 @@ import uuid
 import re
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v31.3", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v31.4", page_icon="🛵", layout="centered")
 
 # --- CSS 樣式 ---
 st.markdown("""
@@ -18,10 +18,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 參數設定 ---
+# --- 參數設定 (已移除機車/汽車括號) ---
 CAR_CONFIG = {
-    "🛵 小迪 (機車)": {"sheet": "小迪", "gas": ["92無鉛", "95無鉛"], "def_gas": "92無鉛"},
-    "🐳 小白鯨 (汽車)": {"sheet": "小白鯨", "gas": ["95無鉛", "98無鉛"], "def_gas": "98無鉛"}
+    "🛵 小迪": {"sheet": "小迪", "gas": ["92無鉛", "95無鉛"], "def_gas": "92無鉛"},
+    "🐳 小白鯨": {"sheet": "小白鯨", "gas": ["95無鉛", "98無鉛"], "def_gas": "98無鉛"}
 }
 MAINTAIN_TYPES = ["定期保養", "零件維修", "輪胎相關", "規費/保險", "美容/洗車", "其他"]
 GAS_PRICES = {"92無鉛": 32.4, "95無鉛": 33.9, "98無鉛": 35.9}
@@ -58,7 +58,7 @@ def load_data():
 
 df = load_data()
 
-# --- 編輯彈窗 (修正：加入漏記編輯) ---
+# --- 編輯彈窗 ---
 @st.dialog("📝 管理紀錄")
 def manage_entry(idx):
     row = df.iloc[idx]
@@ -76,7 +76,6 @@ def manage_entry(idx):
             current_type = row['細目'].split('/')[0] if '/' in row['細目'] else current_conf["def_gas"]
             selected_gas = st.selectbox("油種", current_conf["gas"], index=current_conf["gas"].index(current_type) if current_type in current_conf["gas"] else 0)
             new_detail, new_shop = f"{selected_gas}/{round(new_amt/GAS_PRICES.get(selected_gas, 34), 2)}L", ""
-            # 加油紀錄顯示漏記勾選
             new_miss = "Yes" if st.checkbox("這是一筆漏記紀錄", value=(row['漏記'] == "Yes")) else "No"
         else:
             match = re.match(r"\[(.*?)\]\s*(.*)", str(row['細目']))
@@ -95,7 +94,6 @@ def manage_entry(idx):
             cells = wks.findall(row['id'])
             if cells:
                 r = cells[0].row
-                # 更新 A:日期, C:里程, D:金額, E:細目, F:漏記, G:備註, H:店家
                 wks.update(range_name=f'A{r}', values=[[full_dt]])
                 wks.update(range_name=f'C{r}:H{r}', values=[[new_km, new_amt, new_detail, new_miss, new_note, new_shop]])
                 st.rerun()
@@ -108,12 +106,11 @@ st.title(f"{selected_label}")
 tab1, tab2, tab3 = st.tabs(["🏠 歷史", "➕ 新增", "📊 數據"])
 
 with tab1:
-    if df.empty: st.info("尚無資料")
+    if df.empty: st.info(f"[{selected_label}] 目前尚無資料")
     else:
         st.metric("目前里程", f"{int(df['里程'].max())} km")
         for i, row in df.head(20).iterrows():
             icon = "⛽" if row['類別'] == "加油" else "🛠️"
-            # 如果是漏記，標題加個提示
             miss_tag = " (漏記)" if row['漏記'] == "Yes" else ""
             if st.button(f"{icon} {row['日期'].strftime('%m/%d %H:%M')} | ${int(row['金額'])}{miss_tag}", key=f"rec_{i}"):
                 manage_entry(i)
@@ -134,7 +131,6 @@ with tab2:
             if st.form_submit_button("🚀 儲存加油"):
                 dt = datetime.combine(a_date, a_time).strftime('%Y-%m-%d %H:%M')
                 miss_val = "Yes" if a_miss else "No"
-                # 順序：日期, 類別, 里程, 金額, 細目, 漏記, 備註, 店家, id
                 wks.append_row([dt, "加油", a_km, a_amt, f"{a_type}/{round(a_amt/GAS_PRICES.get(a_type, 34), 2)}L", miss_val, a_note, "", str(uuid.uuid4())])
                 st.rerun()
         else:
@@ -151,11 +147,10 @@ with tab2:
 
 with tab3:
     if not df.empty:
-        # 計算平均油耗時，排除「漏記=Yes」的項目
-        gas_df = df[(df['類別'] == '加油') & (df['漏記'] != 'Yes')].sort_values('日期')
-        # ... (其餘統計邏輯維持不變)
-        monthly_total = df[df['日期'].dt.strftime('%Y-%m') == datetime.now(TAIPEI_TZ).strftime('%Y-%m')]['金額'].sum()
+        this_month = datetime.now(TAIPEI_TZ).strftime('%Y-%m')
+        monthly_total = df[df['日期'].dt.strftime('%Y-%m') == this_month]['金額'].sum()
         st.metric("本月總支出", f"${int(monthly_total)}")
+        st.divider()
         st.write("📊 **支出比例**")
         st.bar_chart(df.groupby('類別')['金額'].sum())
     else: st.info("尚無數據。")
