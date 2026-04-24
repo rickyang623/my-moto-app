@@ -8,7 +8,7 @@ import uuid
 import re
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v25.7 Pro", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v25.9 Pro", page_icon="🛵", layout="centered")
 
 # --- CSS 樣式美化 ---
 st.markdown("""
@@ -24,6 +24,12 @@ st.markdown("""
         border-radius: 10px;
         text-align: center;
         margin-bottom: 10px;
+    }
+    .date-display {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #ff4b4b;
+        margin-bottom: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -46,7 +52,7 @@ def get_worksheet():
 
 wks = get_worksheet()
 
-# --- 數據載入與清洗 ---
+# --- 數據載入 ---
 def load_data():
     all_rows = wks.get_all_values()
     if len(all_rows) <= 1: return pd.DataFrame()
@@ -60,49 +66,45 @@ df = load_data()
 TAIPEI_TZ = pytz.timezone('Asia/Taipei')
 GAS_PRICES = {"92無鉛": 32.4, "95無鉛": 33.9, "98無鉛": 35.9}
 
-# --- 編輯/刪除 彈窗邏輯 (修正行事曆自動彈出問題) ---
+# --- 編輯/刪除 彈窗邏輯 (方案 A：日期預覽模式) ---
 @st.dialog("📝 管理紀錄")
 def manage_entry(idx):
     row = df.iloc[idx]
     is_gas = (row['類別'] == "加油")
 
-    st.subheader(f"{'⛽ 加油' if is_gas else '🛠️ 保養'} 紀錄詳情")
-    st.write(f"📅 目前時間：`{row['日期'].strftime('%Y-%m-%d %H:%M')}`")
+    # 頂部日期預覽
+    st.markdown(f'<p class="date-display">📅 {row["日期"].strftime("%Y-%m-%d %H:%M")}</p>', unsafe_allow_html=True)
     
     with st.form("edit_form"):
-        # 日期修改勾選框 (預設隱藏，避免自動彈出行事曆)
-        show_date_editor = st.checkbox("修改日期時間")
-        
-        if show_date_editor:
+        # 1. 日期修改開關
+        change_dt = st.checkbox("修改日期/時間")
+        if change_dt:
             c1, c2 = st.columns(2)
-            new_date = c1.date_input("新日期", row['日期'].date())
-            new_time = c2.time_input("新時間", row['日期'].time())
+            new_date = c1.date_input("日期", row['日期'].date())
+            new_time = c2.time_input("時間", row['日期'].time())
         else:
             new_date = row['日期'].date()
             new_time = row['日期'].time()
         
         st.divider()
-        
+
+        # 2. 主要資訊 (現在這裡會變成開啟後的焦點)
         c3, c4 = st.columns(2)
         new_km = c3.number_input("里程 (km)", value=int(row['里程']), step=1)
         new_amt = c4.number_input("金額 ($)", value=int(row['金額']), step=1)
-        
-        new_detail = row['細目']
-        new_shop = row['店家']
         
         if is_gas:
             current_type = row['細目'].split('/')[0] if '/' in row['細目'] else "92無鉛"
             selected_gas = st.selectbox("油種", list(GAS_PRICES.keys()), 
                                       index=list(GAS_PRICES.keys()).index(current_type) if current_type in GAS_PRICES else 0)
             new_l = round(new_amt / GAS_PRICES[selected_gas], 2) if new_amt > 0 else 0.0
-            new_detail = f"{selected_gas}/{new_l}L"
-            new_shop = "" 
+            new_detail, new_shop = f"{selected_gas}/{new_l}L", ""
         else:
             new_detail = st.text_area("項目", value=str(row['細目']))
             new_shop = st.text_input("店家", value=str(row['店家']))
             
         new_note = st.text_area("備註", value=str(row['備註']))
-        
+
         st.divider()
         cs, cd = st.columns(2)
         
@@ -138,6 +140,7 @@ with tab1:
 
 with tab2:
     mode = st.radio("類別", ["⛽ 加油", "🛠️ 保養維修"], horizontal=True)
+    # 新增頁面保留原樣，因為新增通常都需要確認日期
     with st.form("add_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         a_date = c1.date_input("日期", datetime.now(TAIPEI_TZ).date())
