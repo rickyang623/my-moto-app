@@ -8,7 +8,7 @@ import uuid
 import re
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v25.9 Pro", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v26.0 Pro", page_icon="🛵", layout="centered")
 
 # --- CSS 樣式美化 ---
 st.markdown("""
@@ -24,12 +24,6 @@ st.markdown("""
         border-radius: 10px;
         text-align: center;
         margin-bottom: 10px;
-    }
-    .date-display {
-        font-size: 1.1rem;
-        font-weight: bold;
-        color: #ff4b4b;
-        margin-bottom: 5px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -66,29 +60,21 @@ df = load_data()
 TAIPEI_TZ = pytz.timezone('Asia/Taipei')
 GAS_PRICES = {"92無鉛": 32.4, "95無鉛": 33.9, "98無鉛": 35.9}
 
-# --- 編輯/刪除 彈窗邏輯 (方案 A：日期預覽模式) ---
+# --- 編輯/刪除 彈窗邏輯 (回歸原始置頂模式) ---
 @st.dialog("📝 管理紀錄")
 def manage_entry(idx):
     row = df.iloc[idx]
     is_gas = (row['類別'] == "加油")
-
-    # 頂部日期預覽
-    st.markdown(f'<p class="date-display">📅 {row["日期"].strftime("%Y-%m-%d %H:%M")}</p>', unsafe_allow_html=True)
     
     with st.form("edit_form"):
-        # 1. 日期修改開關
-        change_dt = st.checkbox("修改日期/時間")
-        if change_dt:
-            c1, c2 = st.columns(2)
-            new_date = c1.date_input("日期", row['日期'].date())
-            new_time = c2.time_input("時間", row['日期'].time())
-        else:
-            new_date = row['日期'].date()
-            new_time = row['日期'].time()
+        # 日期時間直接置頂
+        c1, c2 = st.columns(2)
+        new_date = c1.date_input("日期", row['日期'].date())
+        new_time = c2.time_input("時間", row['日期'].time())
         
         st.divider()
 
-        # 2. 主要資訊 (現在這裡會變成開啟後的焦點)
+        # 主要數據
         c3, c4 = st.columns(2)
         new_km = c3.number_input("里程 (km)", value=int(row['里程']), step=1)
         new_amt = c4.number_input("金額 ($)", value=int(row['金額']), step=1)
@@ -140,7 +126,6 @@ with tab1:
 
 with tab2:
     mode = st.radio("類別", ["⛽ 加油", "🛠️ 保養維修"], horizontal=True)
-    # 新增頁面保留原樣，因為新增通常都需要確認日期
     with st.form("add_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         a_date = c1.date_input("日期", datetime.now(TAIPEI_TZ).date())
@@ -167,9 +152,9 @@ with tab2:
 
 with tab3:
     if not df.empty:
+        # 數據統計邏輯與前版一致
         this_month = datetime.now(TAIPEI_TZ).strftime('%Y-%m')
         monthly_total = df[df['日期'].dt.strftime('%Y-%m') == this_month]['金額'].sum()
-        
         gas_df = df[df['類別'] == '加油'].sort_values('日期')
         avg_eff = 0
         if len(gas_df) >= 2:
@@ -192,4 +177,4 @@ with tab3:
             st.write("📈 **里程增長**")
             st.line_chart(df.sort_values('日期').set_index('日期')['里程'])
     else:
-        st.info("尚無數據進行統計。")
+        st.info("尚無數據。")
