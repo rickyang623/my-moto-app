@@ -18,14 +18,20 @@ def get_worksheet():
     creds = Credentials.from_service_account_info(creds_info, scopes=scope)
     client = gspread.authorize(creds)
     
-    # ✨ 自動尋找名稱為 MyMoto99_Data 的試算表 (解決 ID 複製錯誤問題)
-    try:
-        sh = client.open("MyMoto99_Data")
-        return sh.worksheet("master")
-    except:
-        # 如果名稱找不到，再回退用 ID 開啟
-        sh = client.open_by_key(creds_info["spreadsheet_id"].strip())
-        return sh.worksheet("master")
+    # 自動尋找檔案
+    sh = client.open("MyMoto99_Data")
+    
+    # ✨ 容錯邏輯：自動尋找名稱最像 master 的分頁
+    all_worksheets = [w.title for w in sh.worksheets()]
+    # 移除空格後比對
+    target = next((t for t in all_worksheets if t.strip().lower() == "master"), None)
+    
+    if target:
+        return sh.worksheet(target)
+    else:
+        # 如果真的找不到，噴出診斷訊息
+        st.error(f"❌ 找不到 'master' 分頁！目前偵測到的分頁有：{all_worksheets}")
+        st.stop()
 
 try:
     wks = get_worksheet()
