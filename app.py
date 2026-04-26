@@ -8,17 +8,19 @@ import uuid
 import re
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v31.4", page_icon="🛵", layout="centered")
+st.set_page_config(page_title="MyMoto99 v31.5 Pro", page_icon="🚗", layout="centered")
 
-# --- CSS 樣式 ---
+# --- CSS 樣式美化 ---
 st.markdown("""
 <style>
     div.stButton > button:first-child { border-radius: 8px; height: 3em; width: 100%; }
     .metric-card { background-color: #f0f2f6; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 10px; }
+    .metric-card h2 { color: #ff4b4b; margin: 0; }
+    .metric-card h5 { color: #555; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 參數設定 (已移除機車/汽車括號) ---
+# --- 參數設定 ---
 CAR_CONFIG = {
     "🛵 小迪": {"sheet": "小迪", "gas": ["92無鉛", "95無鉛"], "def_gas": "92無鉛"},
     "🐳 小白鯨": {"sheet": "小白鯨", "gas": ["95無鉛", "98無鉛"], "def_gas": "98無鉛"}
@@ -34,8 +36,12 @@ def get_worksheet(sheet_name):
     creds_info = st.secrets["gsheet"]
     creds = Credentials.from_service_account_info(creds_info, scopes=scope)
     client = gspread.authorize(creds)
-    sh = client.open("MyMoto99_Data")
-    return sh.worksheet(sheet_name)
+    try:
+        sh = client.open("MyMoto99_Data")
+        return sh.worksheet(sheet_name)
+    except Exception as e:
+        st.error(f"❌ 找不到分頁 [{sheet_name}]，請確認名稱是否正確。")
+        st.stop()
 
 # --- 側邊欄：切換車輛 ---
 with st.sidebar:
@@ -58,7 +64,7 @@ def load_data():
 
 df = load_data()
 
-# --- 編輯彈窗 ---
+# --- 編輯/管理彈窗 ---
 @st.dialog("📝 管理紀錄")
 def manage_entry(idx):
     row = df.iloc[idx]
@@ -101,7 +107,7 @@ def manage_entry(idx):
             cells = wks.findall(row['id'])
             if cells: wks.delete_rows(cells[0].row); st.rerun()
 
-# --- 主介面 ---
+# --- 主介面頁籤 ---
 st.title(f"{selected_label}")
 tab1, tab2, tab3 = st.tabs(["🏠 歷史", "➕ 新增", "📊 數據"])
 
@@ -147,10 +153,39 @@ with tab2:
 
 with tab3:
     if not df.empty:
+        # 1. 本月支出
         this_month = datetime.now(TAIPEI_TZ).strftime('%Y-%m')
         monthly_total = df[df['日期'].dt.strftime('%Y-%m') == this_month]['金額'].sum()
-        st.metric("本月總支出", f"${int(monthly_total)}")
+        
+        # 2. 油耗計算邏輯 (兩筆以上加油紀錄)
+        gas_df = df[(df['類別'] == '加油') & (df['漏記'] != 'Yes')].sort_values('日期')
+        avg_eff = 0
+        if len(gas_df) >= 2:
+            total_dist = gas_df['里程'].max() - gas_df['里程'].min()
+            try:
+                liters = []
+                for x in gas_df['細目']:
+                    match = re.search(r"(\d+\.?\d*)L", str(x))
+                    if match: liters.append(float(match.group(1)))
+                # 排除第一筆加油量(因為里程從那開始算)或採總量平均。
+                # 這裡採標準算法：總里程差 / (總公升 - 最後一筆)
+                if total_dist > 0 and len(liters) >= 2:
+                    avg_eff = round(total_dist / sum(liters[1:]), 2)
+            except: avg_eff = 0
+
+        # 顯示看板
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f'<div class="metric-card"><h5>本月總支出</h5><h2>${int(monthly_total)}</h2></div>', unsafe_allow_html=True)
+        with c2:
+            display_eff = f"{avg_eff} <small>km/L</small>" if avg_eff > 0 else "--"
+            st.markdown(f'<div class="metric-card"><h5>平均油耗</h5><h2>{display_eff}</h2></div>', unsafe_allow_html=True)
+        
         st.divider()
-        st.write("📊 **支出比例**")
+        st.write("📊 **累計支出比例**")
         st.bar_chart(df.groupby('類別')['金額'].sum())
-    else: st.info("尚無數據。")
+        
+        st.write("📈 **里程增長趨勢**")
+        st.line_chart(df.sort_values('日期').set_index('日期')['里程'])
+    else:
+        st.info("尚無數據可供統計。")
