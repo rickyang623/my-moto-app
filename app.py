@@ -8,14 +8,15 @@ import uuid
 import re
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v31.6 Pro", page_icon="🚗", layout="centered")
+st.set_page_config(page_title="MyMoto99 v31.7", page_icon="🚗", layout="centered")
 
 # --- CSS 樣式美化 ---
 st.markdown("""
 <style>
     div.stButton > button:first-child { border-radius: 8px; height: 3.5em; width: 100%; }
-    .metric-card { background-color: #f0f2f6; padding: 15px; border-radius: 10px; text-align: center; margin-bottom: 10px; }
-    .metric-card h2 { color: #ff4b4b; margin: 0; }
+    .metric-card { background-color: #f0f2f6; padding: 12px; border-radius: 10px; text-align: center; }
+    .metric-card h2 { color: #ff4b4b; margin: 0; font-size: 1.5rem; }
+    .metric-card h5 { color: #555; margin-bottom: 5px; font-size: 0.9rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -113,16 +114,12 @@ with tab1:
         st.metric("目前里程", f"{int(df['里程'].max())} km")
         for i, row in df.head(20).iterrows():
             icon = "⛽" if row['類別'] == "加油" else "🛠️"
-            
-            # --- 解析並顯示公升數 ---
             display_gas = ""
             if row['類別'] == "加油":
                 gas_match = re.search(r"(\d+\.?\d*L)", str(row['細目']))
                 if gas_match: display_gas = f" | {gas_match.group(1)}"
-            
             miss_tag = " (漏記)" if row['漏記'] == "Yes" else ""
             btn_text = f"{icon} {row['日期'].strftime('%m/%d %H:%M')} | ${int(row['金額'])}{display_gas}{miss_tag}"
-            
             if st.button(btn_text, key=f"rec_{i}"):
                 manage_entry(i)
 
@@ -133,7 +130,6 @@ with tab2:
         a_date = c1.date_input("日期", datetime.now(TAIPEI_TZ).date())
         a_time = c2.time_input("時間", datetime.now(TAIPEI_TZ).time())
         a_km = st.number_input("目前里程 (km)", value=int(df['里程'].max() if not df.empty else 0))
-        
         if mode == "⛽ 加油":
             a_type = st.selectbox("油種", current_conf["gas"])
             a_amt = st.number_input("金額 ($)", min_value=0)
@@ -158,38 +154,28 @@ with tab2:
 
 with tab3:
     if not df.empty:
-        # 1. 本月支出
         this_month = datetime.now(TAIPEI_TZ).strftime('%Y-%m')
         monthly_total = df[df['日期'].dt.strftime('%Y-%m') == this_month]['金額'].sum()
-        
-        # 2. 精準油耗計算
         gas_df = df[(df['類別'] == '加油') & (df['漏記'] != 'Yes')].sort_values('日期')
+        latest_eff = 0
         avg_eff = 0
         if len(gas_df) >= 2:
-            total_dist = gas_df['里程'].max() - gas_df['里程'].min()
             try:
-                liters = []
-                for x in gas_df['細目']:
-                    match = re.search(r"(\d+\.?\d*)L", str(x))
-                    if match: liters.append(float(match.group(1)))
-                if total_dist > 0 and len(liters) >= 2:
-                    # 公式：總里程差 / (總公升 - 第一筆)
-                    # 邏輯：第一筆加油後的里程到最新一筆加滿後的里程，所加的油量總和
-                    avg_eff = round(total_dist / sum(liters[:-1]), 2)
-            except: avg_eff = 0
-
-        # 顯示看板
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f'<div class="metric-card"><h5>本月總支出</h5><h2>${int(monthly_total)}</h2></div>', unsafe_allow_html=True)
-        with c2:
-            display_eff = f"{avg_eff} <small>km/L</small>" if avg_eff > 0 else "--"
-            st.markdown(f'<div class="metric-card"><h5>平均油耗</h5><h2>{display_eff}</h2></div>', unsafe_allow_html=True)
-        
+                liters = [float(re.search(r"(\d+\.?\d*)L", str(x)).group(1)) for x in gas_df['細目'] if re.search(r"(\d+\.?\d*)L", str(x))]
+                # 最新油耗: 最後兩次加油里程差 / 最後一次公升數
+                last_dist = gas_df['里程'].iloc[-1] - gas_df['里程'].iloc[-2]
+                if last_dist > 0: latest_eff = round(last_dist / liters[-1], 2)
+                # 平均油耗: 總里程差 / 除第一筆外的總公升
+                total_dist = gas_df['里程'].max() - gas_df['里程'].min()
+                if total_dist > 0: avg_eff = round(total_dist / sum(liters[1:]), 2)
+            except: pass
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(f'<div class="metric-card"><h5>本月支出</h5><h2>${int(monthly_total)}</h2></div>', unsafe_allow_html=True)
+        c2.markdown(f'<div class="metric-card"><h5>最新油耗</h5><h2>{latest_eff if latest_eff > 0 else "--"} <small style="font-size:10px;">km/L</small></h2></div>', unsafe_allow_html=True)
+        c3.markdown(f'<div class="metric-card"><h5>平均油耗</h5><h2>{avg_eff if avg_eff > 0 else "--"} <small style="font-size:10px;">km/L</small></h2></div>', unsafe_allow_html=True)
         st.divider()
         st.write("📊 **支出比例**")
         st.bar_chart(df.groupby('類別')['金額'].sum())
         st.write("📈 **里程增長趨勢**")
         st.line_chart(df.sort_values('日期').set_index('日期')['里程'])
-    else:
-        st.info("尚無數據。")
+    else: st.info("尚無數據。")
