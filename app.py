@@ -8,7 +8,7 @@ import uuid
 import re
 
 # 1. 頁面配置
-st.set_page_config(page_title="MyMoto99 v31.8 Pro", page_icon="🚗", layout="centered")
+st.set_page_config(page_title="MyMoto99 v31.9 Pro", page_icon="🚗", layout="centered")
 
 # --- CSS 樣式美化 ---
 st.markdown("""
@@ -73,20 +73,20 @@ def manage_entry(idx):
         new_km = c3.number_input("里程 (km)", value=int(row['里程']), step=1)
         new_amt = c4.number_input("金額 ($)", value=int(row['金額']), step=1)
         
-        new_miss = row['漏記']
         if is_gas:
             current_type = row['細目'].split('/')[0] if '/' in row['細目'] else current_conf["def_gas"]
             selected_gas = st.selectbox("油種", current_conf["gas"], index=current_conf["gas"].index(current_type) if current_type in current_conf["gas"] else 0)
-            new_detail, new_shop = f"{selected_gas}/{round(new_amt/GAS_PRICES.get(selected_gas, 34), 2)}L", ""
+            new_detail = f"{selected_gas}/{round(new_amt/GAS_PRICES.get(selected_gas, 34), 2)}L"
             new_miss = "Yes" if st.checkbox("這是一筆漏記紀錄", value=(row['漏記'] == "Yes")) else "No"
+            new_shop = ""
         else:
             match = re.match(r"\[(.*?)\]\s*(.*)", str(row['細目']))
             tag = match.group(1) if match and match.group(1) in MAINTAIN_TYPES else "定期保養"
             content = match.group(2) if match else str(row['細目'])
             new_tag = st.selectbox("類別", MAINTAIN_TYPES, index=MAINTAIN_TYPES.index(tag))
-            new_content = st.text_area("保養內容", value=content)
-            new_detail = f"[{new_tag}] {new_content}"
+            new_detail = f"[{new_tag}] {st.text_area('保養內容', value=content)}"
             new_shop = st.text_input("店家", value=str(row['店家']))
+            new_miss = "No"
             
         new_note = st.text_area("備註", value=str(row['備註']))
         st.divider()
@@ -138,12 +138,12 @@ with tab2:
             a_note = st.text_input("備註")
             if st.form_submit_button("🚀 儲存紀錄"):
                 if a_amt <= 0:
-                    st.error("請輸入大於 0 的金額")
+                    st.error("金額必須大於 0 喔！")
                 else:
                     dt = datetime.combine(a_date, a_time).strftime('%Y-%m-%d %H:%M')
                     miss_val = "Yes" if a_miss else "No"
                     wks.append_row([dt, "加油", a_km, a_amt, f"{a_type}/{round(a_amt/GAS_PRICES.get(a_type, 34), 2)}L", miss_val, a_note, "", str(uuid.uuid4())])
-                    st.toast("✅ 加油紀錄儲存成功！", icon='⛽')
+                    st.toast(f"✅ {selected_label} 加油紀錄已儲存！", icon='⛽')
                     st.rerun()
         else:
             a_tag = st.selectbox("大類別", MAINTAIN_TYPES)
@@ -152,21 +152,21 @@ with tab2:
             a_shop = st.text_input("施工店家")
             a_note = st.text_area("備註")
             if st.form_submit_button("💾 儲存紀錄"):
-                if a_items == "":
+                if not a_items:
                     st.error("請填寫保養內容")
                 else:
                     dt = datetime.combine(a_date, a_time).strftime('%Y-%m-%d %H:%M')
                     full_detail = f"[{a_tag}] {a_items}"
                     wks.append_row([dt, "保養", a_km, a_total, full_detail, "No", a_note, a_shop, str(uuid.uuid4())])
-                    st.toast("✅ 保養紀錄儲存成功！", icon='🛠️')
+                    st.toast(f"✅ {selected_label} 保養紀錄已儲存！", icon='🛠️')
                     st.rerun()
 
 with tab3:
     if not df.empty:
+        # 1. 基礎數據清理
         this_month = datetime.now(TAIPEI_TZ).strftime('%Y-%m')
         monthly_total = df[df['日期'].dt.strftime('%Y-%m') == this_month]['金額'].sum()
         
-        # 數據清理：過濾掉漏記與 0L 的紀錄
         gas_df = df[(df['類別'] == '加油') & (df['漏記'] != 'Yes')]
         gas_df = gas_df[~gas_df['細目'].str.contains(r"0\.?0*L", na=False)].sort_values('日期')
         
@@ -174,22 +174,32 @@ with tab3:
         if len(gas_df) >= 2:
             try:
                 liters = [float(re.search(r"(\d+\.?\d*)L", str(x)).group(1)) for x in gas_df['細目']]
-                # 最新油耗
                 last_dist = gas_df['里程'].iloc[-1] - gas_df['里程'].iloc[-2]
                 if last_dist > 0: latest_eff = round(last_dist / liters[-1], 2)
-                # 平均油耗
                 total_dist = gas_df['里程'].max() - gas_df['里程'].min()
                 if total_dist > 0: avg_eff = round(total_dist / sum(liters[1:]), 2)
             except: pass
 
+        # 2. 三大指標看板
         c1, c2, c3 = st.columns(3)
         c1.markdown(f'<div class="metric-card"><h5>本月支出</h5><h2>${int(monthly_total)}</h2></div>', unsafe_allow_html=True)
         c2.markdown(f'<div class="metric-card"><h5>最新油耗</h5><h2>{latest_eff if latest_eff > 0 else "--"}<br><small style="font-size:10px;">km/L</small></h2></div>', unsafe_allow_html=True)
         c3.markdown(f'<div class="metric-card"><h5>平均油耗</h5><h2>{avg_eff if avg_eff > 0 else "--"}<br><small style="font-size:10px;">km/L</small></h2></div>', unsafe_allow_html=True)
         
         st.divider()
-        st.write("📊 **支出比例**")
+        
+        # 3. 區間里程直條圖 (視覺化用車強度)
+        st.write("📊 **單次行駛里程 (兩次紀錄間的 km)**")
+        df_dist = df.sort_values('日期').copy()
+        df_dist['區間里程'] = df_dist['里程'].diff().fillna(0)
+        df_dist = df_dist[df_dist['區間里程'] > 0] # 排除 0 或負值
+        if not df_dist.empty:
+            st.bar_chart(df_dist.set_index('日期')['區間里程'])
+        else:
+            st.info("尚無足夠里程差資料。")
+            
+        # 4. 支出比例
+        st.write("💰 **累計支出比例**")
         st.bar_chart(df.groupby('類別')['金額'].sum())
-        st.write("📈 **里程增長趨勢**")
-        st.line_chart(df.sort_values('日期').set_index('日期')['里程'])
-    else: st.info("尚無數據。")
+    else:
+        st.info("尚無數據。")
