@@ -193,8 +193,14 @@ with tab3:
         df_dist = df.sort_values('日期').copy()
         df_dist['區間里程'] = df_dist['里程'].diff().fillna(0)
         df_dist = df_dist[df_dist['區間里程'] > 0] # 排除 0 或負值
+        
         if not df_dist.empty:
-            st.bar_chart(df_dist.set_index('日期')['區間里程'])
+            # --- 優化 X 軸顯示：將日期轉為短字串格式 ---
+            df_dist['日期標籤'] = df_dist['日期'].dt.strftime('%m/%d') 
+            
+            # 使用 st.bar_chart 時，指定 index 為剛剛做好的標籤
+            # 這樣 X 軸就會只顯示 05/06, 05/12, 05/15 這種乾淨的格式
+            st.bar_chart(df_dist.set_index('日期標籤')['區間里程'])
         else:
             st.info("尚無足夠里程差資料。")
             
